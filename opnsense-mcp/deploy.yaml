@@ -1,0 +1,8 @@
+# opnsense-mcp deployment using simple-service chart
+
+namespace: opnsense-mcp
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../opnsense-mcp/values.yaml

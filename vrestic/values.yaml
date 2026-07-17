@@ -1,0 +1,57 @@
+# vrestic — base values shared by all CronJob instances
+# Job-specific overrides live in values.immich.yaml, values.paperless.yaml, etc.
+# values.prod.yaml (image tag) is auto-appended by ArgoCD to every source.
+
+workloadType: CronJob
+
+image:
+  repository: harbor.lan/library/vrestic
+  pullPolicy: IfNotPresent
+
+cronjob:
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  restartPolicy: Never
+
+command: ["/vrestic"]
+
+env:
+- name: VAULT_ADDR
+  value: "http://vault.vault.svc.cluster.local:8200"
+- name: HOME
+  value: "/home/nobody"
+- name: RESTIC_CACHE_DIR
+  value: "/tmp/restic-cache"
+
+service:
+  enabled: false
+
+probes:
+  enabled: false
+
+serviceAccount:
+  create: true
+
+vault:
+  enabled: true
+  extraPolicy: |
+    path "kv/data/vrestic/passwords" {
+      capabilities = ["read"]
+    }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: false
+  runAsUser: 65534
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 4Gi

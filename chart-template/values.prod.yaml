@@ -1,0 +1,29 @@
+# Production values
+# Environment-specific overrides
+
+# HTTPRoute hostname
+httproute:
+  hostname: "CHANGEME.rye"  # e.g., myapp.rye or myapp.lan
+  # For TLS with lan, use https-gateway:
+  # gateway:
+  #   name: https-gateway
+
+# Service annotations for Tailscale and Homepage
+service:
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "CHANGEME"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "CHANGEME"
+    gethomepage.dev/description: "CHANGEME"
+    gethomepage.dev/group: "Services"
+    gethomepage.dev/icon: "CHANGEME.png"
+
+# Enable Vault if using secrets
+# vault:
+#   enabled: true
+
+# Enable persistence if needed
+# persistence:
+#   enabled: true
+#   size: 10Gi

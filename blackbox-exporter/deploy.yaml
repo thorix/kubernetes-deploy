@@ -1,0 +1,8 @@
+namespace: victoriametrics
+
+helm:
+- chart: prometheus-blackbox-exporter
+  repoURL: https://prometheus-community.github.io/helm-charts
+  targetRevision: "11.11.0"
+  valuesFiles:
+  - blackbox-exporter/values.yaml

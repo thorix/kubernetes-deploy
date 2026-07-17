@@ -1,0 +1,27 @@
+# vrestic deployment — scheduled restic backups
+# Each source uses values.yaml (base) + job-specific values file.
+# values.prod.yaml (image tag) is auto-appended by ArgoCD to every source.
+
+namespace: vrestic
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../vrestic/values.yaml
+  - ../vrestic/values.immich.yaml
+- path: simple-service
+  valuesFiles:
+  - ../vrestic/values.yaml
+  - ../vrestic/values.paperless.yaml
+- path: simple-service
+  valuesFiles:
+  - ../vrestic/values.yaml
+  - ../vrestic/values.immich-dogutil.yaml
+- path: simple-service
+  valuesFiles:
+  - ../vrestic/values.yaml
+  - ../vrestic/values.immich-pcloud.yaml
+- path: simple-service
+  valuesFiles:
+  - ../vrestic/values.yaml
+  - ../vrestic/values.extra.yaml

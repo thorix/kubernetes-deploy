@@ -1,0 +1,27 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Release.Name }}-data
+spec:
+  capacity:
+    storage: {{ .Values.smb.media.capacity }}
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    {{- range .Values.smb.mountOptions }}
+    - {{ . }}
+    {{- end }}
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeHandle: {{ .Release.Name }}-data
+    volumeAttributes:
+      source: {{ .Values.smb.media.source | quote }}
+      {{- if .Values.smb.media.subDir }}
+      subDir: {{ .Values.smb.media.subDir | quote }}
+      {{- end }}
+    nodeStageSecretRef:
+      name: {{ .Values.smb.secretName }}
+      namespace: {{ .Release.Namespace }}

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "llama-cpp.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llama-cpp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "llama-cpp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "llama-cpp.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: llama-cpp
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - ./llama-server
+        - -hf
+        - {{ .Values.model.huggingface }}
+        env:
+        - name: LLAMA_ARG_MODELS_DIR
+          value: {{ .Values.model.modelsDir }}
+        - name: LLAMA_ARG_HOST
+          value: {{ .Values.server.host }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.server.port }}
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        {{- if .Values.gpu.enabled }}
+        securityContext:
+          privileged: {{ .Values.gpu.privileged }}
+          seccompProfile:
+            type: RuntimeDefault
+        {{- end }}
+        volumeMounts:
+        {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
+        - name: dri
+          mountPath: /dev/dri
+        {{- end }}
+        - name: models
+          mountPath: {{ .Values.model.modelsDir }}
+      volumes:
+      {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
+      - name: dri
+        hostPath:
+          path: /dev/dri
+          type: Directory
+      {{- end }}
+      - name: models
+        hostPath:
+          path: {{ .Values.storage.hostPath }}
+          type: DirectoryOrCreate

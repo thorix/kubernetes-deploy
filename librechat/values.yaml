@@ -1,0 +1,138 @@
+# LibreChat configuration
+# Open source AI chat platform
+
+librechat:
+  image: ghcr.io/danny-avila/librechat:v0.8.6
+  replicas: 1
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# MongoDB configuration
+mongodb:
+  enabled: true
+  image: mongo:7
+
+  # Storage
+  storage:
+    size: 10Gi
+    storageClass: longhorn
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# AI Endpoints configuration
+endpoints:
+  # Anthropic Claude
+  anthropic:
+    enabled: true
+    # API key from Vault secret
+    # Available models (overrides LibreChat defaults)
+    models:
+      - "claude-opus-4-6"
+      - "claude-opus-4-5-20251101"
+      - "claude-sonnet-4-5-20250929"
+      - "claude-sonnet-4-20250514"
+      - "claude-haiku-4-5-20251001"
+      - "claude-3-7-sonnet-20250219"
+      - "claude-3-5-sonnet-20241022"
+      - "claude-3-5-haiku-20241022"
+
+  # Local llama.cpp server
+  llamacpp:
+    enabled: true
+    baseURL: "http://llama-cpp-service.llama.svc.cluster.local:8080/v1"
+    # Models available on your llama.cpp server
+    models:
+      - "llama3"
+      - "mistral"
+
+  # Ollama server
+  ollama:
+    enabled: true
+    baseURL: "http://ollama.ollama.svc.cluster.local:11434"
+    # Default model (required), additional models fetched dynamically
+    defaultModel: "llama3"
+
+# Vault configuration
+vault:
+  # Vault server address
+  address: "http://vault.vault.svc.cluster.local:8200"
+
+  # Skip TLS verification (internal cluster service)
+  skipTLSVerify: true
+
+  # Vault KV mount path
+  mount: kv
+
+  # How often to refresh secrets
+  refreshAfter: 30m
+
+  # Secret paths in Vault
+  secrets:
+    # Anthropic API key: vault kv put kv/librechat/anthropic ANTHROPIC_API_KEY=sk-ant-...
+    anthropic: librechat/anthropic
+    # MongoDB credentials: vault kv put kv/librechat/mongodb username=librechat password=...
+    mongodb: librechat/mongodb
+    # JWT secret for sessions: vault kv put kv/librechat/jwt JWT_SECRET=... JWT_REFRESH_SECRET=...
+    jwt: librechat/jwt
+    # Encryption key: vault kv put kv/librechat/creds CREDS_KEY=... CREDS_IV=...
+    creds: librechat/creds
+
+  # Kubernetes authentication
+  kubernetes:
+    mountPath: kubernetes
+    role: librechat
+    serviceAccount: default
+    audience: vault
+    tokenTTL: 86400
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3080
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "chat"
+    tailscale.com/tags: "tag:k8s-librechat"
+    # Homepage auto-discovery
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "LibreChat"
+    gethomepage.dev/description: "AI chat platform"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "chatgpt.png"
+    gethomepage.dev/href: "https://chat.lan"
+
+# Registration settings
+registration:
+  # Allow new user registration
+  enabled: true
+  # Allowed email domains (empty = all allowed)
+  allowedDomains: []
+
+# Session settings
+session:
+  # Session expiry (7 days) - internal use only
+  expiry: 604800000
+  # Refresh token expiry (30 days)
+  refreshExpiry: 2592000000
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  # Set to true if accessing via HTTP (not HTTPS) to allow sessions to persist
+  insecureHTTP: true
+  gateway:
+    name: http-gateway
+    namespace: kube-system

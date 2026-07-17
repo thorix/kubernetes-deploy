@@ -1,0 +1,63 @@
+# Ollama server configuration
+# Run large language models locally with OpenAI-compatible API
+
+image:
+  repository: ollama/ollama
+  tag: "0.21.2"
+  pullPolicy: IfNotPresent
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 11434
+
+# GPU configuration
+gpu:
+  enabled: true
+  # Mount /dev/dri for Vulkan GPU access (AMD/Intel)
+  driMount: true
+  # Run as privileged for GPU access
+  privileged: true
+  # For NVIDIA GPUs, set runtimeClassName
+  # runtimeClassName: nvidia
+
+# Node pinning (GPU node) is environment-specific -> private overlay
+# (rye/ollama/values.yaml). Omitted from the base.
+
+# Storage for models
+storage:
+  # Use persistent volume for model storage
+  enabled: true
+  size: 100Gi
+  storageClass: longhorn
+  # Or use hostPath instead of PVC
+  # hostPath: /var/mnt/local-storage/ollama
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    memory: 8Gi
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 11434
+  annotations:
+    # Homepage auto-discovery
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Ollama"
+    gethomepage.dev/description: "Local LLM server"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "ollama.png"
+    gethomepage.dev/href: "https://ollama.lan"
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system

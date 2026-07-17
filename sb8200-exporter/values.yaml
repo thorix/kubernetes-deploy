@@ -1,0 +1,61 @@
+image:
+  repository: harbor.lan/library/sb8200-exporter
+  tag: "v0.2.0"
+
+containerPort: 9292
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 9292
+  targetPort: 9292
+
+# MODEM_HOST is the cable modem's LAN address — environment-specific. Real value is
+# in the private config overlay (rye/sb8200-exporter/values.yaml); .lan placeholder here.
+env:
+- name: MODEM_HOST
+  value: "https://modem.lan"
+
+vault:
+  enabled: true
+  secrets:
+    config: "sb8200-exporter/config"
+
+envFrom:
+- secretRef:
+    name: sb8200-exporter-simple-service-config
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9292"
+  prometheus.io/path: "/metrics"
+
+probes:
+  enabled: true
+  liveness:
+    httpGet:
+      path: /
+      port: 9292
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    httpGet:
+      path: /
+      port: 9292
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534

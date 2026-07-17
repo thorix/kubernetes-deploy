@@ -1,0 +1,54 @@
+# Application Configuration
+# Default values - override in values.prod.yaml for production
+
+app:
+  image:
+    repository: CHANGEME
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  env: []
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}  # Set in values.prod.yaml
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system
+
+# Vault integration (disabled by default)
+vault:
+  enabled: false  # Enable in values.prod.yaml
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 30m
+  secrets:
+    app: CHANGEME/credentials
+  kubernetes:
+    mountPath: kubernetes
+    role: CHANGEME
+    serviceAccount: default
+    audience: vault
+    tokenTTL: 86400
+
+# Persistence (disabled by default)
+persistence:
+  enabled: false  # Enable in values.prod.yaml
+  storageClass: longhorn
+  size: 1Gi
+  accessMode: ReadWriteOnce

@@ -1,0 +1,290 @@
+{{- if .Values.rbac.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: read-only-user-no-secrets
+  namespace: default
+---
+# Long-lived token for the read-only service account (required for K8s 1.24+)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: read-only-user-no-secrets-token
+  namespace: default
+  annotations:
+    kubernetes.io/service-account.name: read-only-user-no-secrets
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: read-only-no-secrets
+rules:
+# Core API resources (excluding secret contents)
+- apiGroups: [""]
+  resources:
+    - "pods"
+    - "services"
+    - "endpoints"
+    - "persistentvolumeclaims"
+    - "persistentvolumes"
+    - "nodes"
+    - "namespaces"
+    - "configmaps"
+    - "events"
+    - "serviceaccounts"
+    - "replicationcontrollers"
+    - "limitranges"
+    - "resourcequotas"
+    - "podtemplates"
+  verbs: ["get", "list", "watch"]
+
+# Secrets - list only, not get (to see what exists without reading contents)
+- apiGroups: [""]
+  resources:
+    - "secrets"
+  verbs: ["list", "watch"]
+
+# Pod logs access
+- apiGroups: [""]
+  resources:
+    - "pods/log"
+  verbs: ["get", "list"]
+
+# Pod exec and port-forward access
+- apiGroups: [""]
+  resources:
+    - "pods/exec"
+    - "pods/portforward"
+  verbs: ["create"]
+
+# Apps API group (deployments, etc.)
+- apiGroups: ["apps"]
+  resources:
+    - "deployments"
+    - "daemonsets"
+    - "replicasets"
+    - "statefulsets"
+  verbs: ["get", "list", "watch"]
+
+# Extensions API group
+- apiGroups: ["extensions"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Networking
+- apiGroups: ["networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Gateway API
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Batch (jobs, cronjobs)
+- apiGroups: ["batch"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Autoscaling
+- apiGroups: ["autoscaling"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Storage
+- apiGroups: ["storage.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# RBAC (needed for helm to check permissions)
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources:
+    - "roles"
+    - "rolebindings"
+    - "clusterroles"
+    - "clusterrolebindings"
+  verbs: ["get", "list", "watch"]
+
+# API registration (needed for helm to discover APIs)
+- apiGroups: ["apiregistration.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Admission registration
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# CRDs (Custom Resource Definitions) - helm often needs to read these
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+
+# Policy (Pod Security Policies, Network Policies, etc.)
+- apiGroups: ["policy"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Certificate signing requests
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Coordination (leases, used by some helm charts)
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Discovery (used by helm to discover API groups)
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Metrics (if you want helm to access metrics APIs)
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Node metrics
+- apiGroups: ["node.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Events (extended events API)
+- apiGroups: ["events.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# FlowControl (priority and fairness)
+- apiGroups: ["flowcontrol.apiserver.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# ArgoCD CRDs
+- apiGroups: ["argoproj.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Common CRD groups that helm charts might use
+- apiGroups: ["cert-manager.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# cert-manager ACME resources (challenges, orders)
+- apiGroups: ["acme.cert-manager.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["prometheus.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["traefik.containo.us", "traefik.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["ingress.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Vault Secrets Operator CRDs
+- apiGroups: ["secrets.hashicorp.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Bank-Vaults Operator CRDs (vault-operator)
+- apiGroups: ["vault.banzaicloud.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Vault Config Operator CRDs (redhat-cop)
+- apiGroups: ["redhatcop.redhat.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Longhorn storage CRDs
+- apiGroups: ["longhorn.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# External DNS CRDs
+- apiGroups: ["externaldns.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Cloudflare Tunnel CRDs (if any)
+- apiGroups: ["cloudflare.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Snapshot CRDs (for volume snapshots)
+- apiGroups: ["snapshot.storage.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Cilium CRDs (network policies, envoy configs, endpoints, identities, etc.)
+- apiGroups: ["cilium.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Cilium Isovalent extensions
+- apiGroups: ["isovalent.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Tailscale Operator CRDs
+- apiGroups: ["tailscale.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+
+# Note: Secrets are limited to list/watch only - no get access to contents.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: helm-readonly-debugger
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "deployments", "replicasets", "statefulsets", "daemonsets", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: # Explicitly allow access only to secrets related to Helm release metadata
+    - "sh.helm.release.v1.*" # Example pattern for Helm 3 release secrets
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-only-no-secrets-binding
+subjects:
+- kind: ServiceAccount
+  name: read-only-user-no-secrets
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: read-only-no-secrets
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: helm-debugger-binding
+subjects:
+- kind: ServiceAccount
+  name: read-only-user-no-secrets
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: helm-readonly-debugger
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

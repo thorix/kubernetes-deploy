@@ -1,0 +1,81 @@
+# external-dns with OPNsense webhook provider (sidecar)
+
+sources:
+  - service
+  - ingress
+  - gateway-httproute
+  - crd
+
+domainFilters:
+  - rye
+
+policy: sync
+registry: txt
+txtOwnerId: external-dns
+txtPrefix: _external-dns.
+
+interval: 1m
+logLevel: info
+logFormat: text
+
+extraArgs:
+  - --crd-source-apiversion=externaldns.k8s.io/v1alpha1
+  - --crd-source-kind=DNSEndpoint
+
+provider:
+  name: webhook
+  webhook:
+    image:
+      repository: ghcr.io/crutonjohn/external-dns-opnsense-webhook
+      tag: latest
+      pullPolicy: Always
+    env:
+      - name: LOG_LEVEL
+        value: info
+      - name: SERVER_HOST
+        value: "0.0.0.0"
+      - name: OPNSENSE_HOST
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-opnsense-secret
+            key: api-url
+      - name: OPNSENSE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-opnsense-secret
+            key: api-key
+      - name: OPNSENSE_API_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-opnsense-secret
+            key: api-secret
+    args:
+      - --port=8888
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: http-webhook
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /readyz
+        port: http-webhook
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+serviceAccount:
+  name: external-dns
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

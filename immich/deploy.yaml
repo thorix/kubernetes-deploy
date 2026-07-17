@@ -1,0 +1,19 @@
+# immich deployment - multi-component using simple-service
+# Each helm source deploys a component with its own values file
+
+namespace: immich
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../immich/values.server.yaml
+- path: simple-service
+  valuesFiles:
+  - ../immich/values.postgres.yaml
+- path: simple-service
+  valuesFiles:
+  - ../immich/values.redis.yaml
+- path: simple-service
+  valuesFiles:
+  - ../immich/values.ml.yaml
+- path: immich/backup-verify

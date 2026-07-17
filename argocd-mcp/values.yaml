@@ -1,0 +1,81 @@
+# ArgoCD MCP Server - using simple-service chart
+# MCP server for ArgoCD integration
+
+image:
+  repository: node
+  tag: "24-alpine"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Container port
+containerPort: 3000
+
+# Install argocd-mcp and run with Streamable HTTP transport
+# HTTP transport reads ARGOCD_BASE_URL and ARGOCD_API_TOKEN from env vars natively
+command:
+- /bin/sh
+- -c
+- |
+  npm install -g argocd-mcp@0.5.0
+  exec argocd-mcp http --port 3000
+
+# Environment variables
+env:
+- name: ARGOCD_BASE_URL
+  value: "http://argocd-server.argocd.svc.cluster.local:80"
+- name: ARGOCD_API_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: argocd-mcp-simple-service-token
+      key: ARGOCD_API_TOKEN
+
+# TCP probes since argocd-mcp doesn't have HTTP health endpoint
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: 3000
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    type: tcp
+    port: 3000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+# Service account
+serviceAccount:
+  create: true
+  name: "argocd-mcp"
+
+# Vault integration for ArgoCD API token
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  kubernetes:
+    mountPath: kubernetes
+    role: argocd-mcp
+    serviceAccount: argocd-mcp
+    audience: vault
+    tokenTTL: 86400
+  secrets:
+    token: argocd-mcp/token
+
+# Resource limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

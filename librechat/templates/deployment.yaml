@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.librechat.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        # Auto-restart when ConfigMap changes
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: librechat
+        image: {{ .Values.librechat.image }}
+        {{- if .Values.httproute.insecureHTTP }}
+        # Run in dev mode to allow sessions over HTTP (disables secure cookies)
+        command: ["npm", "run", "backend:dev"]
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: 3080
+          protocol: TCP
+        env:
+        # MongoDB connection
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-mongodb-creds
+              key: MONGO_URI
+
+        # Host configuration
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "3080"
+
+        # Domain for cookies
+        - name: DOMAIN_CLIENT
+          value: "http://{{ .Values.httproute.hostname }}"
+        - name: DOMAIN_SERVER
+          value: "http://{{ .Values.httproute.hostname }}"
+
+        # Session/JWT secrets
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-jwt
+              key: JWT_SECRET
+        - name: JWT_REFRESH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-jwt
+              key: JWT_REFRESH_SECRET
+
+        # Credential encryption
+        - name: CREDS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-creds
+              key: CREDS_KEY
+        - name: CREDS_IV
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-creds
+              key: CREDS_IV
+
+        # Anthropic API key and models
+        {{- if .Values.endpoints.anthropic.enabled }}
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-anthropic
+              key: ANTHROPIC_API_KEY
+        - name: ANTHROPIC_MODELS
+          value: "{{ .Values.endpoints.anthropic.models | join "," }}"
+        {{- end }}
+
+        # Allow registration
+        - name: ALLOW_REGISTRATION
+          value: {{ .Values.registration.enabled | quote }}
+
+        # Session expiry
+        - name: SESSION_EXPIRY
+          value: {{ .Values.session.expiry | quote }}
+        - name: REFRESH_TOKEN_EXPIRY
+          value: {{ .Values.session.refreshExpiry | quote }}
+
+        volumeMounts:
+        - name: config
+          mountPath: /app/librechat.yaml
+          subPath: librechat.yaml
+
+        resources:
+          {{- toYaml .Values.librechat.resources | nindent 10 }}
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+      volumes:
+      - name: config
+        configMap:
+          name: {{ .Release.Name }}-config

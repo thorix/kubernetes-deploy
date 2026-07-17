@@ -1,0 +1,160 @@
+{{- if .Values.applicationSet.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ .Values.applicationSet.name }}
+  namespace: {{ .Values.applicationSet.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: bootstrap
+    {{- include "argocd.labels" . | nindent 4 }}
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+
+  ignoreApplicationDifferences:
+  - jsonPointers:
+      - /spec/syncPolicy
+
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+  - git:
+      repoURL: {{ .Values.applicationSet.generator.repoURL | required "applicationSet.generator.repoURL is required" | quote }}
+      revision: {{ .Values.applicationSet.generator.revision | required "applicationSet.generator.revision is required" | quote }}
+      files:
+      - path: {{ .Values.applicationSet.generator.configPath | required "applicationSet.generator.configPath is required" | quote }}
+      values:
+        helm_values_repo_url: {{ .Values.applicationSet.generator.repoURL | required "applicationSet.generator.repoURL is required" | quote }}
+        default_project: {{ .Values.applicationSet.generator.defaultProject | default "default" | quote }}
+        {{- if .Values.applicationSet.generator.prodValuesFile }}
+        prod_values_file: {{ .Values.applicationSet.generator.prodValuesFile | quote }}
+        {{- end }}
+        {{- if and .Values.applicationSet.generator.configRepoURL .Values.applicationSet.generator.clusterName }}
+        config_values_repo_url: {{ .Values.applicationSet.generator.configRepoURL | quote }}
+        cluster_name: {{ .Values.applicationSet.generator.clusterName | quote }}
+        {{- end }}
+
+  template:
+    metadata:
+      name: '{{`{{index .path.segments 0}}`}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/managed-by: argocd
+        app.kubernetes.io/part-of: '{{`{{index .path.segments 0}}`}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{`{{dig "syncWave" "0" .}}`}}'
+    spec:
+      project: '{{`{{dig "project" .values.default_project .}}`}}'
+      sources:
+      - repoURL: '{{`{{.values.helm_values_repo_url}}`}}'
+        path: '{{`{{index .path.segments 0}}`}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{`{{default (index .path.segments 0) .namespace}}`}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        - ServerSideApply=true
+
+  templatePatch: |
+    spec:
+      sources:
+      {{`{{- $needsValuesRef := false }}`}}
+      {{`{{- range $i, $source := .helm }}`}}
+      {{`{{- if hasKey $source "chart" }}`}}
+      {{`{{- $needsValuesRef = true }}`}}
+      {{`{{- end }}`}}
+      {{`{{- end }}`}}
+      {{`{{- if $needsValuesRef }}`}}
+      - repoURL: '{{`{{$.values.helm_values_repo_url}}`}}'
+        targetRevision: HEAD
+        ref: values
+      {{`{{- end }}`}}
+      {{`{{- if and $.values.config_values_repo_url $.values.cluster_name }}`}}
+      - repoURL: '{{`{{$.values.config_values_repo_url}}`}}'
+        targetRevision: HEAD
+        ref: config
+      {{`{{- end }}`}}
+      {{`{{- range $i, $source := .helm }}`}}
+      - repoURL: '{{`{{dig "repoURL" $.values.helm_values_repo_url $source}}`}}'
+        targetRevision: '{{`{{dig "targetRevision" "HEAD" $source}}`}}'
+        {{`{{- if hasKey $source "chart" }}`}}
+        chart: '{{`{{$source.chart}}`}}'
+        {{`{{- else }}`}}
+        path: '{{`{{dig "path" (index $.path.segments 0) $source}}`}}'
+        {{`{{- end }}`}}
+        helm:
+          {{`{{- $chartPath := dig "path" (index $.path.segments 0) $source }}`}}
+          {{`{{- $appPath := index $.path.segments 0 }}`}}
+          {{`{{- $isExternalChart := hasKey $source "chart" }}`}}
+          {{`{{- if hasKey $source "valuesFiles" }}`}}
+          valueFiles:
+          {{`{{- range $source.valuesFiles }}`}}
+          {{`{{- if $isExternalChart }}`}}
+          - '$values/{{`{{.}}`}}'
+          {{`{{- else }}`}}
+          - '{{`{{.}}`}}'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+          {{`{{- if $.values.prod_values_file }}`}}
+          {{`{{- if $isExternalChart }}`}}
+          - '$values/{{`{{$appPath}}`}}/{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else if eq $chartPath $appPath }}`}}
+          - '{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else if hasPrefix (printf "%s/" $appPath) $chartPath }}`}}
+          - '{{`{{ repeat (sub (len (splitList "/" $chartPath)) 1 | int) "../" }}`}}{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else }}`}}
+          - '../{{`{{$appPath}}`}}/{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+          {{`{{- if and $.values.config_values_repo_url $.values.cluster_name }}`}}
+          {{`{{- range $source.valuesFiles }}`}}
+          - '$config/{{`{{$.values.cluster_name}}`}}/{{`{{$appPath}}`}}/{{`{{ splitList "/" . | last }}`}}'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+          {{`{{- else }}`}}
+          valueFiles:
+          {{`{{- if $isExternalChart }}`}}
+          - '$values/{{`{{$appPath}}`}}/values.yaml'
+          {{`{{- else }}`}}
+          - values.yaml
+          {{`{{- end }}`}}
+          {{`{{- if $.values.prod_values_file }}`}}
+          {{`{{- if $isExternalChart }}`}}
+          - '$values/{{`{{$appPath}}`}}/{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else if eq $chartPath $appPath }}`}}
+          - '{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else if hasPrefix (printf "%s/" $appPath) $chartPath }}`}}
+          - '{{`{{ repeat (sub (len (splitList "/" $chartPath)) 1 | int) "../" }}`}}{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- else }}`}}
+          - '../{{`{{$appPath}}`}}/{{`{{$.values.prod_values_file}}`}}'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+          {{`{{- if and $.values.config_values_repo_url $.values.cluster_name }}`}}
+          - '$config/{{`{{$.values.cluster_name}}`}}/{{`{{$appPath}}`}}/values.yaml'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+          {{`{{- if and $.values.config_values_repo_url $.values.cluster_name }}`}}
+          ignoreMissingValueFiles: true
+          {{`{{- end }}`}}
+          {{`{{- if hasKey $source "fileParameters" }}`}}
+          fileParameters:
+          {{`{{- range $source.fileParameters }}`}}
+          - name: '{{`{{.name}}`}}'
+            path: '{{`{{.path}}`}}'
+          {{`{{- end }}`}}
+          {{`{{- end }}`}}
+      {{`{{- end }}`}}
+      {{`{{- if hasKey . "ignoreDifferences" }}`}}
+      ignoreDifferences:
+      {{`{{- toYaml .ignoreDifferences | nindent 6 }}`}}
+      {{`{{- end }}`}}
+{{- end }}

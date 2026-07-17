@@ -1,0 +1,26 @@
+config:
+  modules:
+    http_2xx:
+      prober: http
+      timeout: 10s
+      http:
+        valid_http_versions:
+        - "HTTP/1.1"
+        - "HTTP/2.0"
+        follow_redirects: true
+        preferred_ip_protocol: ip4
+    icmp_ipv4:
+      prober: icmp
+      icmp:
+        preferred_ip_protocol: ip4
+
+securityContext:
+  capabilities:
+    add: ["NET_RAW"]
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 64Mi

@@ -1,0 +1,7 @@
+# audiobookshelf deployment
+
+namespace: audiobookshelf
+
+helm:
+- valuesFiles:
+  - values.yaml

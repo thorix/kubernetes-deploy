@@ -1,0 +1,163 @@
+# Frigate NVR - real-time AI object detection for IP cameras
+# Uses simple-service chart directly
+
+fullnameOverride: frigate
+
+image:
+  repository: ghcr.io/blakeblackshear/frigate
+  tag: "stable"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+podAnnotations:
+  configmap-hash: "20260616-config-to-configrepo-retain60d"
+
+# Use Recreate strategy - only one instance should access recordings PVC
+strategy:
+  type: Recreate
+
+# Frigate web UI port (8971 = authenticated HTTPS, 5000 = internal HTTP)
+containerPort: 8971
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 5000
+
+# HTTPRoute - disabled by default, enabled in values.prod.yaml
+httproute:
+  enabled: false
+  hostname: ""
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+
+serviceAccount:
+  create: true
+
+# Node pinning (GPU node for VAAPI hardware decode) is environment-specific and
+# lives in the private overlay (rye/frigate/values.yaml) — omitted from the base.
+
+# Frigate takes time to start - increase initial delay
+probes:
+  enabled: true
+  liveness:
+    path: /api/version
+    port: 5000
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    # Tolerate transient API backend stalls (under load/reclaim) so kubelet
+    # doesn't SIGKILL a healthy container. ~90s of grace before restart.
+    timeoutSeconds: 10
+    failureThreshold: 6
+  readiness:
+    path: /api/version
+    port: 5000
+    initialDelaySeconds: 60
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Frigate is resource-heavy with video processing. The cgroup was pegged at
+# the old 4Gi limit (memory.peak=4Gi, 24k+ reclaim events) — mostly reclaimable
+# page cache from recording I/O — starving the API and triggering liveness
+# SIGKILLs. Node has 128Gi; give it headroom.
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 8Gi
+
+# ConfigMap for frigate config.yml (injected via fileParameters in deploy.yaml)
+# Mounted to /config-ro (read-only) and copied to /config by initContainer
+# because Frigate needs a writable /config for model cache and config migration
+configMap:
+  enabled: true
+  mountPath: /config-ro
+  files: {}
+
+initContainers:
+- name: copy-config
+  image: busybox:1.37
+  command: ['sh', '-c', 'cp /config-ro/config.yml /config/config.yml']
+  volumeMounts:
+  - name: config
+    mountPath: /config-ro
+    readOnly: true
+  - name: config-rw
+    mountPath: /config
+
+# Environment variables
+env:
+- name: TZ
+  value: "UTC"
+
+# Inject RTSP credentials from Vault-synced secret
+envFrom:
+- secretRef:
+    name: frigate-rtsp
+- secretRef:
+    name: frigate-doorbell
+
+# Privileged security context needed for GPU device access
+securityContext:
+  privileged: true
+
+# Recordings storage on SMB NAS
+persistentVolumes:
+- name: recordings
+  capacity: 1Ti
+  accessModes:
+    - ReadWriteMany
+  mountOptions:
+    - dir_mode=0777
+    - file_mode=0666
+    - uid=0
+    - gid=0
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeAttributes:
+      source: "//nas.lan/frigate"
+    nodeStageSecretRef:
+      name: frigate-smb
+
+# Additional volumes
+volumes:
+- name: config-rw
+  emptyDir: {}
+- name: cache
+  emptyDir:
+    medium: Memory
+- name: shm
+  emptyDir:
+    medium: Memory
+    sizeLimit: 256Mi
+- name: dri
+  hostPath:
+    path: /dev/dri
+    type: Directory
+
+# Additional volume mounts
+volumeMounts:
+- name: recordings
+  mountPath: /media/frigate
+- name: config-rw
+  mountPath: /config
+- name: cache
+  mountPath: /tmp/cache
+- name: shm
+  mountPath: /dev/shm
+- name: dri
+  mountPath: /dev/dri
+
+# Vault integration for RTSP camera credentials
+vault:
+  enabled: true
+  secrets:
+    rtsp: "frigate/rtsp"
+    doorbell: "frigate/doorbell"
+    smb: "frigate/smb"

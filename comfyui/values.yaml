@@ -1,0 +1,96 @@
+# Base values for ComfyUI
+# ComfyUI is a powerful and modular Stable Diffusion GUI with a graph/nodes interface
+
+# Gateway configuration for HTTPRoute
+gateway:
+  name: http-gateway
+  namespace: kube-system
+
+# Hostname is environment-specific - set in values.<env>.yaml
+hostname: ""
+
+# ComfyUI image configuration
+image:
+  # yanwk/comfyui-boot is the most popular community image
+  # Available tags:
+  #   cu128-slim: CUDA 12.8 for NVIDIA GPUs (recommended, also works on CPU)
+  #   cu128-megapak: CUDA 12.8 with all extensions
+  #   rocm: ROCm for AMD GPUs
+  #   cpu: CPU-only variant
+  repository: yanwk/comfyui-boot
+  tag: "cu128-slim"  # Change to "rocm" for AMD GPUs
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8188  # ComfyUI default port
+  annotations:
+    # Homepage auto-discovery
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "ComfyUI"
+    gethomepage.dev/description: "Stable Diffusion UI"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "si-pytorch"
+    gethomepage.dev/href: "https://comfy.lan"
+
+# GPU configuration (optional)
+# Enable this if you have NVIDIA or AMD GPU nodes available
+gpu:
+  enabled: false
+  # GPU type: nvidia or amd
+  type: "nvidia"  # Change to "amd" for AMD GPUs with ROCm
+  # Number of GPUs to request (typically 1)
+  count: 1
+  # RuntimeClass for GPU access
+  # - For NVIDIA: requires nvidia-container-runtime
+  # - For AMD: requires ROCm-compatible runtime
+  runtimeClassName: ""  # e.g., "nvidia" or "amdgpu"
+  # Node tolerations for GPU nodes
+  tolerations: []
+  # Example for NVIDIA:
+  # - key: nvidia.com/gpu
+  #   operator: Exists
+  #   effect: NoSchedule
+  # Example for AMD:
+  # - key: amd.com/gpu
+  #   operator: Exists
+  #   effect: NoSchedule
+
+# Persistence for models and outputs
+persistence:
+  enabled: true
+  # Storage class (empty = use cluster default)
+  storageClassName: ""
+  # Size for model storage (models can be large - 10s of GB)
+  size: 50Gi
+  # Mount paths (matches ComfyUI Docker image structure)
+  models:
+    mountPath: /root/ComfyUI/models
+  outputs:
+    mountPath: /root/ComfyUI/output
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    memory: 8Gi
+    # GPU will be added conditionally if gpu.enabled=true
+
+# Environment variables
+env: []
+# Example for CPU-only mode:
+# - name: COMMANDLINE_ARGS
+#   value: "--cpu"
+
+# Additional arguments to pass to ComfyUI
+# Use this to customize startup behavior
+extraArgs: []
+# Example:
+# - "--listen"
+# - "0.0.0.0"
+# - "--port"
+# - "8188"

@@ -1,0 +1,141 @@
+# n8n workflow automation - queue mode with workers
+# Chart: 8gears/n8n (OCI)
+
+image:
+  pullPolicy: IfNotPresent
+
+# No ingress — internal only, use port-forward for UI access
+ingress:
+  enabled: false
+
+# Main app — serves UI and API
+main:
+  config:
+    executions_mode: queue
+    db:
+      type: postgresdb
+      postgresdb:
+        host: n8n-postgres
+        port: 5432
+        database: n8n
+        user: n8n
+    queue:
+      health:
+        check:
+          active: true
+      bull:
+        redis:
+          host: n8n-valkey
+          port: 6379
+    generic:
+      timezone: UTC
+    n8n:
+      diagnostics:
+        enabled: false
+
+  extraEnv:
+    # Database password from Vault (kv/n8n/config)
+    DB_POSTGRESDB_PASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: DB_POSTGRESDB_PASSWORD
+    # Encryption key for stored credentials — must be stable across restarts
+    N8N_ENCRYPTION_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: N8N_ENCRYPTION_KEY
+    # MCP gateway token — reference in n8n credentials as {{ $env.MCP_GATEWAY_TOKEN }}
+    MCP_GATEWAY_TOKEN:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: MCP_GATEWAY_TOKEN
+    # Required for MCP client tool in AI agent workflows
+    N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:
+      value: "true"
+
+  persistence:
+    enabled: true
+    type: dynamic
+    storageClass: longhorn
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 80
+
+# Workers — process queued workflow executions
+worker:
+  enabled: true
+  concurrency: 10
+  replicaCount: 1
+
+  extraEnv:
+    DB_POSTGRESDB_PASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: DB_POSTGRESDB_PASSWORD
+    N8N_ENCRYPTION_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: N8N_ENCRYPTION_KEY
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+# Webhook processor — handles incoming webhook triggers and MCP server connections
+# Keep replicaCount at 1 for MCP Server Trigger compatibility (requires persistent connections)
+webhook:
+  enabled: true
+  replicaCount: 1
+
+  extraEnv:
+    DB_POSTGRESDB_PASSWORD:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: DB_POSTGRESDB_PASSWORD
+    N8N_ENCRYPTION_KEY:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: N8N_ENCRYPTION_KEY
+    MCP_GATEWAY_TOKEN:
+      valueFrom:
+        secretKeyRef:
+          name: n8n-config
+          key: MCP_GATEWAY_TOKEN
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# Valkey (Redis-compatible) — job queue for worker communication
+valkey:
+  enabled: true
+  replicaCount: 1
+  auth:
+    enabled: false
+  dataStorage:
+    enabled: false

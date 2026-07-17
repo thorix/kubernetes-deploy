@@ -1,0 +1,38 @@
+{{- if .Values.vault.enabled }}
+---
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  # Vault connection settings
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+
+  # How vault-config-operator authenticates to Vault
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+
+  # Policy name in Vault
+  name: {{ .Release.Name }}
+
+  # HCL policy definition
+  policy: |
+    # Allow reading Cloudflare API token for DNS-01 challenge
+    path "kv/data/{{ .Values.vault.secrets.cloudflare }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow listing secrets (for metadata)
+    path "kv/metadata/{{ .Values.vault.secrets.cloudflare }}" {
+      capabilities = ["read", "list"]
+    }
+{{- end }}

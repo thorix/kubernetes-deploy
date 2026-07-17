@@ -1,0 +1,47 @@
+# Local guards: catch secrets AND environment-specific values BEFORE they commit
+# (same checks as CI). One-time setup:
+#   pipx install pre-commit   (or: pip install pre-commit)
+#   pre-commit install
+# Then every `git commit` runs these on the staged changes.
+# Build on it later by adding more hooks (yamllint, helm lint, kubeconform, etc.).
+repos:
+  # Layer 1a — secrets (gitleaks: fast regex/entropy rules)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        # uses .gitleaks.toml in the repo root automatically
+
+  # Layer 1b — secrets (trufflehog: complementary detectors + verification).
+  # Optional locally (install the binary: brew/scoop/`go install`, or see
+  # https://github.com/trufflesecurity/trufflehog). If it isn't installed the
+  # hook skips with a note — CI always runs trufflehog, so it's still enforced.
+  - repo: local
+    hooks:
+      - id: trufflehog
+        name: trufflehog (secret scan)
+        entry: bash -c 'command -v trufflehog >/dev/null 2>&1 || { echo "trufflehog not installed locally — skipping (CI enforces it)"; exit 0; }; trufflehog git file://. --since-commit HEAD --results=verified,unknown --fail --no-update'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+
+  # Layer A — hygiene: no real domains / private IPs in this public template repo
+  - repo: local
+    hooks:
+      - id: hygiene-lint
+        name: hygiene-lint (no env-specific values in public repo)
+        entry: python3 scripts/hygiene_lint.py
+        language: system
+        pass_filenames: true
+        types: [text]
+        exclude: '(^|/)charts/'
+
+  # Guard — commit timestamps must be UTC (offset leaks your region; also on GitHub)
+  - repo: local
+    hooks:
+      - id: commit-tz-utc
+        name: commit timestamps must be UTC
+        entry: scripts/check_commit_tz.sh
+        language: system
+        pass_filenames: false
+        always_run: true

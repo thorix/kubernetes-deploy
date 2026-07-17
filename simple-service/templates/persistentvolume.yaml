@@ -1,0 +1,65 @@
+{{- range .Values.persistentVolumes }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "simple-service.fullname" $ }}-{{ .name }}
+  labels:
+    {{- include "simple-service.labels" $ | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .capacity }}
+  accessModes:
+    {{- toYaml .accessModes | nindent 4 }}
+  persistentVolumeReclaimPolicy: {{ .reclaimPolicy | default "Retain" }}
+  {{- with .mountOptions }}
+  mountOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .csi }}
+  csi:
+    driver: {{ .csi.driver }}
+    {{- if .csi.readOnly }}
+    readOnly: {{ .csi.readOnly }}
+    {{- end }}
+    volumeHandle: {{ include "simple-service.fullname" $ }}-{{ .name }}
+    {{- with .csi.volumeAttributes }}
+    volumeAttributes:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if .csi.nodeStageSecretRef }}
+    nodeStageSecretRef:
+      name: {{ .csi.nodeStageSecretRef.name }}
+      namespace: {{ .csi.nodeStageSecretRef.namespace | default $.Release.Namespace }}
+    {{- end }}
+  {{- end }}
+  {{- if .hostPath }}
+  hostPath:
+    path: {{ .hostPath.path }}
+    type: {{ .hostPath.type | default "DirectoryOrCreate" }}
+  {{- end }}
+  {{- if .nfs }}
+  nfs:
+    server: {{ .nfs.server }}
+    path: {{ .nfs.path }}
+    {{- if .nfs.readOnly }}
+    readOnly: {{ .nfs.readOnly }}
+    {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "simple-service.fullname" $ }}-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" $ | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .accessModes | nindent 4 }}
+  storageClassName: ""
+  resources:
+    requests:
+      storage: {{ .capacity }}
+  volumeName: {{ include "simple-service.fullname" $ }}-{{ .name }}
+{{- end }}

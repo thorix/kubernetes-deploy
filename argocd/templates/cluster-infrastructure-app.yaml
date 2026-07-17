@@ -1,0 +1,36 @@
+{{- if .Values.clusterInfrastructure.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-infrastructure
+  namespace: {{ .Values.applicationSet.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: bootstrap
+    {{- include "argocd.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ .Values.clusterInfrastructure.project | default "default" }}
+  source:
+    repoURL: {{ .Values.clusterInfrastructure.repoURL | required "clusterInfrastructure.repoURL is required" | quote }}
+    targetRevision: {{ .Values.clusterInfrastructure.targetRevision | default "HEAD" | quote }}
+    path: {{ .Values.clusterInfrastructure.path | default "cluster-infrastructure" | quote }}
+    helm:
+      valueFiles:
+        - values.yaml
+        {{- if .Values.clusterInfrastructure.prodValuesFile }}
+        - {{ .Values.clusterInfrastructure.prodValuesFile | quote }}
+        {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}

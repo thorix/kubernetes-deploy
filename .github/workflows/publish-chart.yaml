@@ -1,0 +1,82 @@
+name: Publish Helm Chart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'simple-service/**'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force publish even if version exists'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  CHART_NAME: simple-service
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.14.0
+
+      - name: Get chart version
+        id: chart
+        run: |
+          VERSION=$(grep '^version:' ${{ env.CHART_NAME }}/Chart.yaml | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Chart version: $VERSION"
+
+      - name: Check if version exists
+        id: check
+        run: |
+          if helm pull oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/${{ env.CHART_NAME }} \
+              --version ${{ steps.chart.outputs.version }} 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Version ${{ steps.chart.outputs.version }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Version ${{ steps.chart.outputs.version }} does not exist"
+          fi
+
+      - name: Login to GHCR
+        if: steps.check.outputs.exists == 'false' || github.event.inputs.force == 'true'
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package chart
+        if: steps.check.outputs.exists == 'false' || github.event.inputs.force == 'true'
+        run: helm package ${{ env.CHART_NAME }}
+
+      - name: Push chart to GHCR
+        if: steps.check.outputs.exists == 'false' || github.event.inputs.force == 'true'
+        run: |
+          helm push ${{ env.CHART_NAME }}-${{ steps.chart.outputs.version }}.tgz \
+            oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check.outputs.exists }}" == "true" ] && [ "${{ github.event.inputs.force }}" != "true" ]; then
+            echo "### Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "Version ${{ steps.chart.outputs.version }} already exists. Use force=true to overwrite." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Published" >> $GITHUB_STEP_SUMMARY
+            echo "Chart: \`oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/${{ env.CHART_NAME }}:${{ steps.chart.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          fi

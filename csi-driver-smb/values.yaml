@@ -1,0 +1,27 @@
+# Base values for SMB CSI Driver
+# SMB CSI Driver enables mounting SMB/CIFS shares as volumes in Kubernetes
+
+# Values for the csi-driver-smb subchart
+csi-driver-smb:
+  # Security context to disable AppArmor restrictions for CSI containers
+  securityContext:
+    appArmorProfile:
+      type: Unconfined
+
+  # Controller resources
+  controller:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+  # Node resources
+  node:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi

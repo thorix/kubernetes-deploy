@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llama-cpp
+description: llama.cpp server for local LLM inference with Vulkan GPU acceleration
+type: application
+version: 0.1.0
+appVersion: "rolling"

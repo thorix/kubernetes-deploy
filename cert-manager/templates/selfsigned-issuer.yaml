@@ -1,0 +1,45 @@
+{{- if .Values.selfSigned.enabled }}
+---
+# Self-signed ClusterIssuer - used to bootstrap the CA certificate
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.selfSigned.clusterIssuerName }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+# Self-signed CA Certificate (1 year validity)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.selfSigned.caCertificateName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: "{{ .Release.Namespace }}-ca"
+  secretName: {{ .Values.selfSigned.caCertificateName }}-secret
+  duration: {{ .Values.selfSigned.caDuration }}
+  renewBefore: {{ .Values.selfSigned.caRenewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ .Values.selfSigned.clusterIssuerName }}
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# CA ClusterIssuer - issues certificates signed by the self-signed CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.selfSigned.caClusterIssuerName }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ .Values.selfSigned.caCertificateName }}-secret
+{{- end }}

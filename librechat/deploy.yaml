@@ -1,0 +1,7 @@
+# librechat deployment
+
+namespace: librechat
+
+helm:
+- valuesFiles:
+  - values.yaml

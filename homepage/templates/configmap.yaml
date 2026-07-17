@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "homepage.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "homepage.labels" . | nindent 4 }}
+data:
+  settings.yaml: |
+    title: Home Dashboard
+    favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/homepage.png
+    theme: dark
+    color: slate
+    headerStyle: boxed
+    layout:
+      - Media:
+          style: row
+          columns: 2
+      - AI:
+          style: row
+          columns: 4
+      - Monitoring:
+          style: row
+          columns: 4
+      - Infrastructure:
+          style: row
+          columns: 3
+
+  widgets.yaml: |
+    - search:
+        provider: custom
+        url: {{ .Values.chatSearchUrl }}
+        target: _blank
+        placeholder: Ask LibreChat...
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: short
+          hourCycle: h23
+    - resources:
+        cpu: true
+        memory: true
+        disk: /
+        expanded: true
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+        nodes:
+          show: false
+
+  bookmarks.yaml: |
+    - Developer:
+        - GitHub:
+            - icon: github.png
+              href: https://github.com
+              description: Code repositories
+        - Kubernetes Dashboard:
+            - icon: kubernetes.png
+              href: https://kubernetes.io/docs
+              description: K8s documentation
+    - Media:
+        - YouTube:
+            - icon: youtube.png
+              href: https://youtube.com
+              description: Video platform
+
+  services.yaml: ""
+
+  kubernetes.yaml: |
+    mode: cluster
+    gateway: true

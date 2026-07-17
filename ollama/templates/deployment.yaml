@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ollama.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ollama.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ollama.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ollama.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.gpu.runtimeClassName }}
+      {{- end }}
+      containers:
+      - name: ollama
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: OLLAMA_HOST
+          value: "{{ .Values.server.host }}:{{ .Values.server.port }}"
+        {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
+        - name: OLLAMA_VULKAN
+          value: "1"
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.server.port }}
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        {{- if .Values.gpu.enabled }}
+        securityContext:
+          privileged: {{ .Values.gpu.privileged }}
+          seccompProfile:
+            type: RuntimeDefault
+        {{- end }}
+        volumeMounts:
+        {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
+        - name: dri
+          mountPath: /dev/dri
+        {{- end }}
+        - name: ollama-data
+          mountPath: /root/.ollama
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
+      - name: dri
+        hostPath:
+          path: /dev/dri
+          type: Directory
+      {{- end }}
+      - name: ollama-data
+        {{- if .Values.storage.hostPath }}
+        hostPath:
+          path: {{ .Values.storage.hostPath }}
+          type: DirectoryOrCreate
+        {{- else if .Values.storage.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "ollama.fullname" . }}-data
+        {{- else }}
+        emptyDir: {}
+        {{- end }}

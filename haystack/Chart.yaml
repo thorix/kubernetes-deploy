@@ -1,0 +1,12 @@
+apiVersion: v2
+name: haystack
+description: Haystack RAG knowledge base with Milvus vector store and Hayhooks API
+type: application
+version: 0.1.0
+appVersion: "1.9.0"
+
+dependencies:
+  - name: milvus
+    version: "5.0.x"
+    repository: "https://zilliztech.github.io/milvus-helm"
+    condition: milvus.enabled

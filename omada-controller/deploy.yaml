@@ -1,0 +1,10 @@
+# omada-controller deployment
+# TP-Link Omada SDN Controller — manages WiFi APs
+# Uses hostNetwork for AP discovery (UDP broadcast on LAN)
+
+namespace: omada-controller
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../omada-controller/values.yaml

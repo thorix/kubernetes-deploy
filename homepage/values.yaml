@@ -1,0 +1,40 @@
+# Base values for Homepage dashboard
+
+# LibreChat quick-search link in the dashboard (real host set in the rye overlay)
+chatSearchUrl: https://chat.lan/?prompt=
+
+image:
+  repository: ghcr.io/gethomepage/homepage
+  tag: latest
+  pullPolicy: Always
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3000
+
+# Gateway configuration
+gateway:
+  name: http-gateway
+  namespace: kube-system
+
+# hostname is environment-specific - set in values.<env>.yaml
+hostname: ""
+
+# Resource limits
+resources:
+  limits:
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Service account
+serviceAccount:
+  name: homepage
+
+# Security context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000

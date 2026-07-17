@@ -1,0 +1,104 @@
+# Haystack RAG Knowledge Base Configuration
+
+# Hayhooks - REST API and MCP server for Haystack pipelines
+hayhooks:
+  image: deepset/hayhooks:v1.17.0
+  replicas: 1
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 4Gi
+
+# Milvus vector database (standalone mode)
+milvus:
+  enabled: true
+  cluster:
+    enabled: false
+  standalone:
+    messageQueue: rocksmq  # Use embedded message queue
+    persistence:
+      enabled: true
+      persistentVolumeClaim:
+        size: 20Gi
+        storageClass: longhorn
+  etcd:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: longhorn
+  minio:
+    mode: standalone
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: longhorn
+  pulsar:
+    enabled: false
+  pulsarv3:
+    enabled: false
+  kafka:
+    enabled: false
+
+# Ollama integration (existing deployment)
+ollama:
+  baseURL: "http://ollama.ollama.svc.cluster.local:11434"
+  embeddingModel: "nomic-embed-text"
+
+# Storage for cloned git repositories
+storage:
+  repos:
+    enabled: true
+    size: 10Gi
+    storageClass: longhorn
+
+# Service configuration
+service:
+  type: ClusterIP
+  apiPort: 1416
+  mcpPort: 1417
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Haystack"
+    gethomepage.dev/description: "RAG Knowledge Base"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "mdi-database-search"
+    gethomepage.dev/href: "https://haystack.lan"
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system
+
+# Indexer CronJob configuration
+indexer:
+  # Cron schedule (default: every 6 hours)
+  schedule: "0 */6 * * *"
+
+# Git repositories to index
+repositories:
+  - name: ai-knowledge-base
+    url: "https://github.com/YOUR_ORG/ai-knowledge-base.git"
+    branch: main
+
+# Vault integration for secrets
+vault:
+  enabled: false
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  kubernetes:
+    mountPath: kubernetes
+    role: haystack
+    serviceAccount: default
+    audience: vault
+    tokenTTL: 86400
+  secrets:
+    github: haystack/github

@@ -1,0 +1,33 @@
+# Tailscale Operator configuration
+# All tailscale-operator subchart values are nested under "tailscale-operator:"
+
+# Egress services — expose tailnet nodes as in-cluster Services.
+# Each entry creates a Tailscale proxy pod the operator manages.
+egressServices: []
+
+# Subnet router Connector configuration
+connector:
+  enabled: false  # Enable in values.prod.yaml
+  hostname: k8s-subnet-router
+  routes:
+    - "10.244.0.0/16"  # Pod CIDR
+    - "10.96.0.0/12"   # Service CIDR
+  tags:
+    - "tag:k8s"
+
+# tailscale-operator subchart configuration
+tailscale-operator:
+  installCRDs: true
+  operatorConfig:
+    defaultTags:
+      - "tag:k8s-operator"
+  proxyConfig:
+    defaultTags: "tag:k8s"
+  # OAuth secret is created manually (kubectl create secret generic operator-oauth)
+  # The operator automatically looks for it in its namespace
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

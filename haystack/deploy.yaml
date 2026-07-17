@@ -1,0 +1,7 @@
+# haystack deployment
+
+namespace: haystack
+
+helm:
+- valuesFiles:
+  - values.yaml

@@ -1,0 +1,77 @@
+# Base values for Vault deployment
+# All vault subchart values are nested under "vault:"
+
+# Gateway configuration for HTTPRoute
+gateway:
+  name: http-gateway
+  namespace: kube-system
+
+# Hostname is environment-specific - set in values.<env>.yaml
+hostname: ""
+
+# Vault subchart configuration
+vault:
+  global:
+    logLevel: trace
+
+  ui:
+    enabled: true
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: "Vault"
+      gethomepage.dev/description: "Secrets management"
+      gethomepage.dev/group: "Infrastructure"
+      gethomepage.dev/icon: "vault.png"
+      gethomepage.dev/href: "https://vault.lan"
+
+  injector:
+    enabled: false
+
+  server:
+    updateStrategyType: "RollingUpdate"
+
+    ingress:
+      enabled: false  # We'll use HTTPRoute instead
+
+    dataStorage:
+      enabled: true
+      size: 1Gi
+      storageClass: null  # Use default storage class
+      labels:
+        app: vault
+
+    # Volumes for GCP KMS auto-unseal key
+    # Note: Secret must be created manually before deployment
+    volumes:
+      - name: userconfig-vault-autounseal-key
+        secret:
+          secretName: vault-autounseal-key
+          defaultMode: 420
+
+    volumeMounts:
+      - name: userconfig-vault-autounseal-key
+        mountPath: /vault/userconfig/vault-autounseal-key
+        readOnly: true
+
+    standalone:
+      config: |
+        ui = true
+        listener "tcp" {
+          tls_disable = 1
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+        storage "file" {
+          path = "/vault/data"
+        }
+        telemetry {
+          prometheus_retention_time = "2h",
+          disable_hostname = true
+        }
+        seal "gcpckms" {
+          credentials = "/vault/userconfig/vault-autounseal-key/key.json"
+          project     = "vault-414606"
+          region      = "us-central1"
+          key_ring    = "vault-ring"
+          crypto_key  = "vault1"
+        }

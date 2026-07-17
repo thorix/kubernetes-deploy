@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ollama
+description: Ollama - Run large language models locally with OpenAI-compatible API
+type: application
+version: 0.1.0
+appVersion: "0.15.1"

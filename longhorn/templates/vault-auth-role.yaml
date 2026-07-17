@@ -1,0 +1,30 @@
+{{- if and .Values.vault.enabled .Values.vault.secrets }}
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: KubernetesAuthEngineRole
+metadata:
+  name: {{ include "longhorn.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "longhorn.labels" . | nindent 4 }}
+spec:
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+  path: {{ .Values.vault.kubernetes.mountPath }}
+  name: {{ .Values.vault.kubernetes.role }}
+  targetServiceAccounts:
+    - {{ .Values.vault.kubernetes.serviceAccount }}
+  targetNamespaces:
+    targetNamespaces:
+      - {{ .Release.Namespace }}
+  policies:
+    - {{ include "longhorn.fullname" . }}
+  audience: {{ .Values.vault.kubernetes.audience }}
+  tokenTTL: {{ .Values.vault.kubernetes.tokenTTL }}
+{{- end }}

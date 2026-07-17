@@ -1,0 +1,189 @@
+server:
+  retentionPeriod: 90d
+
+  persistentVolume:
+    enabled: true
+    size: 50Gi
+    storageClassName: longhorn
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  service:
+    annotations:
+      tailscale.com/expose: "true"
+      tailscale.com/hostname: "victoriametrics"
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: "VictoriaMetrics"
+      gethomepage.dev/description: "Time-series database"
+      gethomepage.dev/group: "Monitoring"
+      gethomepage.dev/icon: "victoriametrics.png"
+      gethomepage.dev/href: "https://victoriametrics.lan"
+
+  extraContainers:
+    - name: config-reloader
+      image: jimmidyson/configmap-reload:v0.9.0
+      args:
+        - --volume-dir=/scrapeconfig
+        - --webhook-url=http://localhost:8428/-/reload
+      volumeMounts:
+        - name: scrapeconfig
+          mountPath: /scrapeconfig
+          readOnly: true
+
+  scrape:
+    enabled: true
+    config:
+      global:
+        scrape_interval: 30s
+      scrape_configs:
+      - job_name: kubernetes-nodes
+        kubernetes_sd_configs:
+        - role: node
+        relabel_configs:
+        - source_labels: [__address__]
+          regex: (.+):(.+)
+          target_label: __address__
+          replacement: ${1}:9100
+      - job_name: kubelet-cadvisor
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+        - role: node
+        relabel_configs:
+        - target_label: __metrics_path__
+          replacement: /metrics/cadvisor
+        metric_relabel_configs:
+        - source_labels: [__name__]
+          regex: container_(cpu_cfs_throttled_periods_total|cpu_cfs_periods_total|memory_working_set_bytes|spec_memory_limit_bytes)
+          action: keep
+      - job_name: kubelet
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+        - role: node
+        metric_relabel_configs:
+        - source_labels: [__name__]
+          regex: kubelet_volume_stats_(available_bytes|capacity_bytes|used_bytes|inodes|inodes_free|inodes_used)
+          action: keep
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: "true"
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: ${1}:${2}
+          target_label: __address__
+      - job_name: longhorn
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - longhorn-system
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: longhorn-manager
+        - source_labels: [__meta_kubernetes_pod_ip]
+          action: replace
+          target_label: __address__
+          regex: (.+)
+          replacement: ${1}:9500
+        metric_relabel_configs:
+        - source_labels: [__name__]
+          regex: longhorn_(volume_state|volume_robustness|volume_actual_size_bytes|volume_capacity_bytes|node_status|node_count_total|disk_status|disk_capacity_bytes|disk_usage_bytes|backup_state)
+          action: keep
+      - job_name: blackbox-http
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+        - targets: []
+        relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: blackbox-exporter-prometheus-blackbox-exporter:9115
+      - job_name: blackbox-ping
+        metrics_path: /probe
+        scrape_interval: 60s
+        params:
+          module: [icmp_ipv4]
+        static_configs:
+        - targets: []
+        relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: blackbox-exporter-prometheus-blackbox-exporter:9115
+      - job_name: blackbox-internal
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+        - targets:
+          - http://plex-simple-service.plex.svc:32400/web/index.html
+        relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: blackbox-exporter-prometheus-blackbox-exporter:9115
+
+extraObjects:
+  # Non-headless service for Gateway API routing (chart's server service is headless)
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: victoriametrics-http
+      namespace: victoriametrics
+    spec:
+      selector:
+        app.kubernetes.io/name: victoria-metrics-single
+        app.kubernetes.io/instance: victoriametrics
+      ports:
+        - name: http
+          port: 8428
+          targetPort: 8428
+      type: ClusterIP
+  # HTTPRoute — external-dns syncs victoriametrics.lan to the gateway
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: victoriametrics
+      namespace: victoriametrics
+    spec:
+      parentRefs:
+        - name: https-gateway
+          namespace: kube-system
+      hostnames:
+        - victoriametrics.lan
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          backendRefs:
+            - name: victoriametrics-http
+              port: 8428

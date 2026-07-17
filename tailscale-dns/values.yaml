@@ -1,0 +1,100 @@
+# tailscale-dns - CoreDNS for Tailscale split DNS
+# Resolves *.example.lan to the https-gateway ClusterIP so remote
+# Tailscale clients can reach cluster services via the subnet router.
+
+image:
+  repository: coredns/coredns
+  tag: "1.14.3"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# CoreDNS command
+command:
+  - /coredns
+args:
+  - -conf
+  - /etc/coredns/Corefile
+
+# DNS ports (UDP+TCP)
+ports:
+  - name: dns-udp
+    containerPort: 53
+    protocol: UDP
+  - name: dns-tcp
+    containerPort: 53
+    protocol: TCP
+
+# Service exposes DNS on port 53
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+
+# No HTTPRoute needed - internal DNS only
+httproute:
+  enabled: false
+
+# No vault secrets needed
+vault:
+  enabled: false
+
+# ServiceAccount
+serviceAccount:
+  create: true
+
+# ConfigMap with Corefile and zone file
+configMap:
+  enabled: true
+  mountPath: /etc/coredns
+  # The real DNS zone (server block + zone file, including the zone-file data key
+  # name) lives in the per-source overlay rye/tailscale-dns/values.yaml. The overlay
+  # supplies both the real Corefile (replacing this scalar via map-merge) and the
+  # zone-file key. The public base intentionally defines ONLY the Corefile with a
+  # generic .lan zone so no org-specific domain — including a domain-shaped configMap
+  # data key — appears here. On rye the overlay's Corefile and zone key fully render.
+  files:
+    Corefile: |
+      lan:53 {
+          file /etc/coredns/lan.db
+          log
+      }
+
+      .:53 {
+          forward . 10.96.0.10
+          cache 30
+      }
+
+# Minimal resources for a DNS forwarder
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+# TCP probes on DNS port
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: dns-tcp
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    type: tcp
+    port: dns-tcp
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3

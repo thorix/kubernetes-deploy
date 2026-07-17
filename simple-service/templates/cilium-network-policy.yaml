@@ -1,0 +1,58 @@
+{{- if ((.Values.networkPolicy).enabled) }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "simple-service.selectorLabels" . | nindent 6 }}
+  {{- if or ((.Values.networkPolicy.ingress).gatewayOnly) ((.Values.networkPolicy.ingress).customRules) }}
+  ingress:
+    {{- if ((.Values.networkPolicy.ingress).gatewayOnly) }}
+    - fromEntities:
+        - host
+        - remote-node
+        - ingress
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tailscale
+    {{- end }}
+    {{- range .Values.networkPolicy.ingress.customRules }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- if or ((.Values.networkPolicy.egress).denyAll) ((.Values.networkPolicy.egress).customRules) }}
+  egress:
+    {{- if ((.Values.networkPolicy.egress).denyAll) }}
+    {{- if or ((.Values.networkPolicy.egress).allowDNS) ((.Values.networkPolicy.egress).customRules) }}
+    {{- if ((.Values.networkPolicy.egress).allowDNS) }}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    {{- end }}
+    {{- range .Values.networkPolicy.egress.customRules }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- else }}
+    []
+    {{- end }}
+    {{- else }}
+    {{- range .Values.networkPolicy.egress.customRules }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}

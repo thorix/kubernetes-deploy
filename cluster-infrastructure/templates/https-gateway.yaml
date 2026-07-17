@@ -1,0 +1,69 @@
+{{- if .Values.httpsGateway.enabled }}
+---
+# HTTPS Gateway for TLS termination
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.httpsGateway.name }}
+  namespace: {{ .Values.httpsGateway.namespace }}
+  labels:
+    {{- include "cluster-infrastructure.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.httpsGateway.gatewayClassName }}
+  listeners:
+    {{- range .Values.httpsGateway.listeners }}
+    - name: {{ .name }}
+      protocol: HTTPS
+      port: 443
+      {{- if .hostname }}
+      hostname: {{ .hostname | quote }}
+      {{- end }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: {{ .certificateSecretName }}
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- end }}
+    {{- if .Values.httpsGateway.httpRedirect }}
+    # HTTP listener for redirect to HTTPS
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    {{- end }}
+---
+{{- range .Values.httpsGateway.certificates }}
+# Certificate: {{ .name }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.httpsGateway.namespace }}
+  labels:
+    {{- include "cluster-infrastructure.labels" $ | nindent 4 }}
+spec:
+  secretName: {{ .secretName }}
+  duration: {{ .duration }}
+  renewBefore: {{ .renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    {{- range .dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  issuerRef:
+    name: {{ .clusterIssuer }}
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+{{- end }}
+{{- end }}

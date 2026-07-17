@@ -1,0 +1,194 @@
+{{- if not (index .Values "vault-config-operator" "enableCertManager") }}
+# Generate self-signed webhook certificates and patch webhook configs when cert-manager is not enabled
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webhook-cert-gen
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: webhook-cert-gen
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: webhook-cert-gen
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: webhook-cert-gen
+subjects:
+  - kind: ServiceAccount
+    name: webhook-cert-gen
+    namespace: {{ .Release.Namespace }}
+---
+# ClusterRole to patch webhook configurations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-webhook-cert-gen
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-webhook-cert-gen
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-webhook-cert-gen
+subjects:
+  - kind: ServiceAccount
+    name: webhook-cert-gen
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: webhook-cert-gen
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    helm.sh/hook-weight: "0"
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      serviceAccountName: webhook-cert-gen
+      restartPolicy: OnFailure
+      containers:
+        - name: create-cert
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              cd /tmp
+
+              # Check if secret already exists and has valid cert
+              if kubectl get secret webhook-server-cert -n {{ .Release.Namespace }} -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d | openssl x509 -noout 2>/dev/null; then
+                echo "Valid webhook-server-cert already exists"
+                # Still need to ensure CA is in webhook configs
+                CA_BUNDLE=$(kubectl get secret webhook-server-cert -n {{ .Release.Namespace }} -o jsonpath='{.data.ca\.crt}' 2>/dev/null || echo "")
+                if [ -z "$CA_BUNDLE" ]; then
+                  echo "No CA in secret, regenerating..."
+                else
+                  echo "Patching webhook configurations with existing CA..."
+                  kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
+                    --type='json' -p="[{'op': 'add', 'path': '/webhooks/0/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || true
+                  # Patch all webhooks in the config
+                  for i in $(seq 0 50); do
+                    kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
+                      --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
+                  done
+                  for i in $(seq 0 50); do
+                    kubectl patch validatingwebhookconfiguration vault-config-operator-validating-webhook-configuration \
+                      --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
+                  done
+                  echo "Done patching webhook configurations"
+                  exit 0
+                fi
+              fi
+
+              echo "Generating new certificates..."
+
+              # Generate CA
+              openssl genrsa -out ca.key 2048
+              openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+                -out ca.crt -subj "/CN=vault-config-operator-ca"
+
+              # Generate server key and CSR
+              openssl genrsa -out tls.key 2048
+              openssl req -new -key tls.key -out server.csr \
+                -subj "/CN=vault-config-operator-webhook-service.{{ .Release.Namespace }}.svc"
+
+              # Create extension file for SAN
+              cat > ext.cnf << EXTEOF
+              authorityKeyIdentifier=keyid,issuer
+              basicConstraints=CA:FALSE
+              keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+              subjectAltName = @alt_names
+
+              [alt_names]
+              DNS.1 = vault-config-operator-webhook-service
+              DNS.2 = vault-config-operator-webhook-service.{{ .Release.Namespace }}
+              DNS.3 = vault-config-operator-webhook-service.{{ .Release.Namespace }}.svc
+              DNS.4 = vault-config-operator-webhook-service.{{ .Release.Namespace }}.svc.cluster.local
+              EXTEOF
+
+              # Sign the certificate
+              openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+                -CAcreateserial -out tls.crt -days 3650 -sha256 -extfile ext.cnf
+
+              # Delete existing secret if it exists
+              kubectl delete secret webhook-server-cert -n {{ .Release.Namespace }} 2>/dev/null || true
+
+              # Create the secret with CA included
+              kubectl create secret generic webhook-server-cert \
+                --from-file=tls.crt=tls.crt \
+                --from-file=tls.key=tls.key \
+                --from-file=ca.crt=ca.crt \
+                -n {{ .Release.Namespace }}
+
+              echo "Created webhook-server-cert secret"
+
+              # Get CA bundle for webhook config
+              CA_BUNDLE=$(cat ca.crt | base64 | tr -d '\n')
+
+              # Patch mutating webhook configuration
+              echo "Patching mutating webhook configuration..."
+              for i in $(seq 0 50); do
+                kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
+                  --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
+              done
+
+              # Patch validating webhook configuration
+              echo "Patching validating webhook configuration..."
+              for i in $(seq 0 50); do
+                kubectl patch validatingwebhookconfiguration vault-config-operator-validating-webhook-configuration \
+                  --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
+              done
+
+              echo "Successfully configured webhook certificates"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+{{- end }}

@@ -1,0 +1,12 @@
+namespace: frigate
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../frigate/values.yaml
+  # Live config.yml is location-specific (cameras, streams, retention) and
+  # lives in the private config repo, resolved via the $config ref source the
+  # ApplicationSet injects. See frigate/config.yml.example for the template.
+  fileParameters:
+  - name: "configMap.files.config\\.yml"
+    path: $config/rye/frigate/config.yml

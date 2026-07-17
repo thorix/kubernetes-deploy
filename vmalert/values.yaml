@@ -1,0 +1,280 @@
+server:
+  datasource:
+    url: http://victoriametrics-victoria-metrics-single-server:8428
+  remote:
+    write:
+      url: http://victoriametrics-victoria-metrics-single-server:8428
+  notifier:
+    alertmanager:
+      url: http://vmalert-alertmanager:9093
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  config:
+    alerts:
+      groups:
+      - name: blackbox
+        rules:
+        - alert: EndpointDown
+          expr: probe_success == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Endpoint {{ $labels.instance }} is down"
+            description: "HTTP probe has been failing for more than 2 minutes."
+        - alert: EndpointSlowResponse
+          expr: probe_http_duration_seconds{phase="transfer"} > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Endpoint {{ $labels.instance }} slow response"
+            description: "HTTP probe transfer phase taking more than 5 seconds."
+        - alert: PlexDown
+          expr: probe_success{job="blackbox-internal", instance=~".*plex.*"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Plex is down (internal probe failing)"
+            description: "Internal HTTP probe to Plex service has been failing for 1 minute. Users cannot stream."
+        - alert: SSLCertExpiringSoon
+          expr: probe_ssl_earliest_cert_expiry - time() < 7 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "SSL cert for {{ $labels.instance }} expires in less than 7 days"
+      - name: kubernetes
+        rules:
+        - alert: PodCrashLoopBackOff
+          expr: rate(kube_pod_container_status_restarts_total[15m]) * 60 * 5 > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+        - alert: ContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total[1h]) > 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value }} times in 1h"
+        - alert: PodNotReady
+          expr: kube_pod_status_phase{phase=~"Pending|Unknown"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} not ready"
+        - alert: HighMemoryUsage
+          expr: container_memory_working_set_bytes / container_spec_memory_limit_bytes > 0.9 and container_spec_memory_limit_bytes > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory usage above 90%"
+        - alert: HighCPUThrottling
+          expr: rate(container_cpu_cfs_throttled_periods_total[5m]) / rate(container_cpu_cfs_periods_total[5m]) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU throttled >50%"
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} is not ready"
+      - name: storage
+        rules:
+        - alert: PVCUsageHigh
+          expr: kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.15 and kubelet_volume_stats_capacity_bytes > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} usage is high"
+            description: "Less than 15% space remaining."
+        - alert: PVCUsageCritical
+          expr: kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.05 and kubelet_volume_stats_capacity_bytes > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} is almost full"
+            description: "Less than 5% space remaining."
+        - alert: PVCFillingUp
+          expr: predict_linear(kubelet_volume_stats_available_bytes[6h], 24 * 3600) < 0 and kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.4 and kubelet_volume_stats_capacity_bytes > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} predicted to fill within 24h"
+            description: "Based on 6h trend, volume will run out of space within a day."
+      - name: longhorn
+        rules:
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness == 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is degraded"
+            description: "Volume has fewer healthy replicas than requested. Data redundancy is reduced."
+        - alert: LonghornVolumeFaulted
+          expr: longhorn_volume_robustness == 3
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is faulted"
+            description: "Volume has lost all redundancy or is in an error state. Immediate action required."
+        - alert: LonghornNodeNotReady
+          expr: longhorn_node_status{condition="ready"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} is not ready"
+            description: "Storage node is not ready. No new replicas can be scheduled on this node."
+        - alert: LonghornDiskNotSchedulable
+          expr: longhorn_node_status{condition="schedulable"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} disk is not schedulable"
+            description: "Disk cannot accept new replicas. Check disk health and available space."
+        - alert: LonghornDiskSpaceLow
+          expr: (longhorn_disk_usage_bytes / longhorn_disk_capacity_bytes) > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn disk on {{ $labels.node }} is over 85% full"
+            description: "Longhorn storage disk is running low on space. Replica scheduling may fail."
+      - name: immich
+        rules:
+        - alert: ImmichPostgresHighMemory
+          expr: container_memory_working_set_bytes{namespace="immich", pod=~"immich-postgres.*", container="immich-postgres"} / container_spec_memory_limit_bytes{namespace="immich", pod=~"immich-postgres.*", container="immich-postgres"} > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich PostgreSQL memory usage above 85%"
+            description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit. Risk of OOMKill."
+        - alert: ImmichPostgresRestarted
+          expr: increase(kube_pod_container_status_restarts_total{namespace="immich", pod=~"immich-postgres.*"}[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Immich PostgreSQL restarted"
+            description: "PostgreSQL container has restarted in the last hour. Check for OOMKill or crash."
+        - alert: ImmichServerHighMemory
+          expr: container_memory_working_set_bytes{namespace="immich", pod=~"immich-server.*", container="immich-server"} / container_spec_memory_limit_bytes{namespace="immich", pod=~"immich-server.*", container="immich-server"} > 0.85
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Immich server memory usage above 85%"
+            description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit. Current: {{ $value | humanize }}. May OOMKill soon."
+        - alert: ImmichBackupVerifyFailed
+          expr: kube_job_status_failed{namespace="immich", job_name=~"immich-backup-verify.*"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Immich database backup verification failed"
+            description: "The daily backup verification job failed. Today's pg_dump may be missing or corrupted. Check job logs: kubectl logs -n immich job/{{ $labels.job_name }}"
+      - name: oom
+        rules:
+        - alert: ContainerOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} was OOMKilled"
+            description: "Container was terminated due to exceeding its memory limit. Review resource limits and consider increasing."
+        - alert: ContainerExitCode137
+          expr: kube_pod_container_status_last_terminated_exitcode == 137
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} exited with code 137 (likely OOMKilled)"
+            description: "Exit code 137 indicates SIGKILL, usually from OOM. Check memory limits."
+      - name: argocd
+        rules:
+        - alert: ArgoCDRepoServerUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="argocd", deployment="argocd-repo-server"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ArgoCD repo-server has zero available replicas — all syncs are blocked"
+        - alert: ArgoCDAppSyncFailed
+          expr: argocd_app_info{sync_status="Unknown"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} sync status Unknown for 15m"
+
+alertmanager:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  config:
+    receivers:
+    - name: slack-critical
+      slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/SLACK_WEBHOOK_URL
+        channel: "#alerts"
+        color: danger
+        title: "{{ .Status | toUpper }} | {{ .CommonLabels.alertname }}"
+        text: "{{ range .Alerts }}*{{ .Annotations.summary }}*\n{{ .Annotations.description }}\n{{ end }}"
+        send_resolved: true
+    - name: slack-warning
+      slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/SLACK_WEBHOOK_URL
+        channel: "#alerts"
+        color: warning
+        title: "{{ .Status | toUpper }} | {{ .CommonLabels.alertname }}"
+        text: "{{ range .Alerts }}*{{ .Annotations.summary }}*\n{{ .Annotations.description }}\n{{ end }}"
+        send_resolved: true
+    route:
+      receiver: slack-warning
+      group_by:
+      - alertname
+      - namespace
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+      - receiver: slack-critical
+        matchers:
+        - severity = critical
+  extraVolumes:
+  - name: slack-secret
+    secret:
+      secretName: vmalert-slack
+  extraVolumeMounts:
+  - name: slack-secret
+    mountPath: /etc/alertmanager/secrets
+    readOnly: true
+  service:
+    annotations: {}

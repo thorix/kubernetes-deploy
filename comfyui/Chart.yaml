@@ -1,0 +1,6 @@
+apiVersion: v2
+name: comfyui
+description: ComfyUI - A powerful and modular Stable Diffusion GUI with a graph/nodes interface
+type: application
+version: 0.1.0
+appVersion: "latest"

@@ -1,0 +1,45 @@
+{{- if .Values.vault.enabled }}
+---
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: KubernetesAuthEngineRole
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  # Vault connection settings
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+
+  # How vault-config-operator authenticates to Vault
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+
+  # Kubernetes auth mount path in Vault
+  path: {{ .Values.vault.kubernetes.mountPath }}
+
+  # Role name in Vault
+  name: {{ .Values.vault.kubernetes.role }}
+
+  # Bind to service account in this namespace
+  targetServiceAccounts:
+    - {{ .Values.vault.kubernetes.serviceAccount }}
+  targetNamespaces:
+    targetNamespaces:
+      - {{ .Release.Namespace }}
+
+  # Attach policy (created by Policy above)
+  policies:
+    - {{ .Release.Name }}
+
+  # Token settings
+  audience: {{ .Values.vault.kubernetes.audience }}
+  # tokenTTL is in seconds (86400 = 24 hours)
+  tokenTTL: {{ .Values.vault.kubernetes.tokenTTL | default 86400 }}
+{{- end }}

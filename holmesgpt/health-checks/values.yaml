@@ -1,0 +1,16 @@
+# Vault integration for HolmesGPT secrets
+# Creates K8s secrets from Vault for the Holmes deployment to reference
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 1h
+  kubernetes:
+    mountPath: kubernetes
+    role: holmesgpt
+    serviceAccount: holmesgpt-holmes-service-account
+    audience: vault
+    tokenTTL: 86400
+  secrets:
+    mcp-gateway: holmesgpt/mcp-gateway

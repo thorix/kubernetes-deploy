@@ -1,0 +1,136 @@
+{{- if .Values.proxyCache.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-proxy-cache-setup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+data:
+  setup.py: |
+    #!/usr/bin/env python3
+    import json, os, sys, time
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError
+    from base64 import b64encode
+
+    HARBOR_URL = "http://harbor.{{ .Release.Namespace }}.svc.cluster.local:80"
+    HARBOR_USER = "admin"
+    HARBOR_PASS = os.environ["HARBOR_ADMIN_PASSWORD"]
+    AUTH = b64encode(f"{HARBOR_USER}:{HARBOR_PASS}".encode()).decode()
+    HEADERS = {"Authorization": f"Basic {AUTH}", "Content-Type": "application/json"}
+
+    REGISTRIES = json.loads('''{{ .Values.proxyCache.registries | toJson }}''')
+
+    def api(method, path, data=None):
+        body = json.dumps(data).encode() if data else None
+        req = Request(f"{HARBOR_URL}/api/v2.0/{path}", data=body, headers=HEADERS, method=method)
+        resp = urlopen(req)
+        content = resp.read()
+        return json.loads(content) if content else None
+
+    def api_get(path):
+        req = Request(f"{HARBOR_URL}/api/v2.0/{path}", headers=HEADERS)
+        return json.loads(urlopen(req).read())
+
+    # Wait for Harbor API
+    print("Waiting for Harbor API...", flush=True)
+    for i in range(60):
+        try:
+            req = Request(f"{HARBOR_URL}/api/v2.0/health", headers=HEADERS)
+            resp = urlopen(req)
+            resp.read()
+            print("Harbor API is ready", flush=True)
+            break
+        except (URLError, ConnectionError, OSError):
+            if i == 59:
+                print("ERROR: Harbor API not ready after 120s")
+                sys.exit(1)
+            time.sleep(2)
+
+    for reg in REGISTRIES:
+        name = reg["name"]
+        reg_type = reg["type"]
+        url = reg["url"]
+        project = reg["project"]
+
+        # Check/create registry endpoint
+        print(f"Checking registry endpoint: {name}")
+        existing = api_get("registries")
+        if not any(r["name"] == name for r in existing):
+            print(f"  Creating registry endpoint: {name}")
+            api("POST", "registries", {
+                "name": name, "type": reg_type, "url": url, "insecure": False
+            })
+            print(f"  -> Created")
+        else:
+            print(f"  -> Already exists")
+
+        # Check/create proxy cache project
+        print(f"Checking proxy cache project: {project}")
+        projects = api_get(f"projects?name={project}")
+        if not any(p["name"] == project for p in projects):
+            # Get registry ID
+            regs = api_get("registries")
+            reg_id = next(r["id"] for r in regs if r["name"] == name)
+            print(f"  Creating proxy cache project: {project} (registry_id={reg_id})")
+            api("POST", "projects", {
+                "project_name": project,
+                "registry_id": reg_id,
+                "public": True,
+                "storage_limit": -1
+            })
+            print(f"  -> Created")
+        else:
+            print(f"  -> Already exists")
+
+    print("Proxy cache setup complete!")
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-proxy-cache-setup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: setup
+        image: python:3-alpine
+        command: ["python3", "/scripts/setup.py"]
+        env:
+        - name: HARBOR_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: harbor-admin
+              key: HARBOR_ADMIN_PASSWORD
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+          readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65534
+      volumes:
+      - name: scripts
+        configMap:
+          name: harbor-proxy-cache-setup
+          defaultMode: 0555
+{{- end }}

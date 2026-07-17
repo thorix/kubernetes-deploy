@@ -1,0 +1,93 @@
+# Base values for Audiobookshelf
+# Audiobookshelf is a self-hosted audiobook and podcast server
+
+# Audiobookshelf server configuration
+audiobookshelf:
+  image: ghcr.io/advplyr/audiobookshelf:2.33.2
+  timezone: UTC
+
+  # User and group IDs for file permissions
+  uid: 1000
+  gid: 1000
+  fsGroup: 1000
+
+  # Storage configuration (Longhorn volumes)
+  storage:
+    # Config and metadata volume
+    configMetadataSize: 5Gi
+    configMetadataStorageClass: longhorn
+
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# SMB volume configuration
+smb:
+  # Secret name for SMB credentials (created by VaultStaticSecret)
+  secretName: smbcreds
+
+  # Vault path for SMB credentials. The real path embeds the NAS server name and
+  # lives in the private overlay (rye/audiobookshelf/values.yaml); placeholder here.
+  vaultPath: smb/nas/audiobookshelf
+
+  # Mount options for SMB shares
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+
+  # Media volume - audiobooks and podcasts. Real NAS share is in the private overlay.
+  media:
+    source: "//nas.lan/media"
+    subDir: audio.books
+    capacity: 1Ti
+
+# Vault configuration
+vault:
+  # Vault server address
+  address: "http://vault.vault.svc.cluster.local:8200"
+
+  # Skip TLS verification (internal cluster service)
+  skipTLSVerify: true
+
+  # Vault KV mount path
+  mount: kv
+
+  # How often to refresh secrets (30 minutes)
+  refreshAfter: 30m
+
+  # Kubernetes authentication
+  kubernetes:
+    mountPath: kubernetes
+    role: audiobookshelf
+    serviceAccount: default
+    audience: vault
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "audiobookshelf"
+    tailscale.com/tags: "tag:k8s-audiobookshelf"
+    # Homepage auto-discovery
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Audiobookshelf"
+    gethomepage.dev/description: "Audiobook library"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "audiobookshelf.png"
+    gethomepage.dev/href: "https://abs.lan"
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.<env>.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system

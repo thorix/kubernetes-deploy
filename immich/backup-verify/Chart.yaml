@@ -1,0 +1,4 @@
+apiVersion: v2
+name: immich-backup-verify
+description: Verifies Immich built-in PostgreSQL backups exist and are valid
+version: 1.0.0

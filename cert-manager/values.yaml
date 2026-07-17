@@ -1,0 +1,62 @@
+# cert-manager configuration
+# All cert-manager subchart values are nested under "cert-manager:"
+
+# Self-signed ClusterIssuer configuration
+selfSigned:
+  enabled: true
+  clusterIssuerName: selfsigned-issuer
+  caClusterIssuerName: selfsigned-ca-issuer
+  caCertificateName: selfsigned-ca
+  caDuration: 8760h    # 1 year
+  caRenewBefore: 720h  # 30 days
+
+# Let's Encrypt ClusterIssuer configuration
+letsEncrypt:
+  enabled: false  # Enable in values.prod.yaml
+  clusterIssuerName: letsencrypt-prod
+  server: https://acme-v02.api.letsencrypt.org/directory
+  email: ""  # Set in values.prod.yaml
+  certificateNamespace: kube-system
+  cloudflare:
+    email: ""  # Set in values.prod.yaml
+    apiTokenKey: api-token
+    dnsZones: []  # Set in values.prod.yaml
+  certificates: []  # Set in values.prod.yaml
+
+# Vault integration for Cloudflare API token
+vault:
+  enabled: false  # Enable in values.prod.yaml
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 1h
+  secrets:
+    cloudflare: cert-manager/cloudflare
+  kubernetes:
+    mountPath: kubernetes
+    role: cert-manager
+    serviceAccount: cert-manager
+    audience: vault
+
+# cert-manager subchart configuration
+cert-manager:
+  crds:
+    enabled: true
+    keep: true
+  namespace: cert-manager
+  webhook:
+    timeoutSeconds: 30
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  prometheus:
+    enabled: false
+    servicemonitor:
+      enabled: false
+  podDisruptionBudget:
+    enabled: false
+  global:
+    logLevel: 2

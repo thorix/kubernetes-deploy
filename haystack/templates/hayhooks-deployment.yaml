@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "haystack.fullname" . }}-hayhooks
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "haystack.hayhooksLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.hayhooks.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "haystack.hayhooksSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "haystack.hayhooksSelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/pipelines: {{ include (print $.Template.BasePath "/hayhooks-configmap.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+      # Install git and pipeline dependencies before hayhooks starts
+      - name: install-deps
+        image: {{ .Values.hayhooks.image }}
+        securityContext:
+          runAsUser: 0
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Installing pipeline dependencies..."
+          pip install --no-cache-dir --target=/opt/extra-packages \
+            haystack-ai milvus-haystack ollama-haystack nltk mcp
+          echo "Downloading NLTK data..."
+          PYTHONPATH=/opt/extra-packages python -c "import nltk; nltk.download('punkt_tab', quiet=True, download_dir='/opt/extra-packages/nltk_data')"
+          echo "Dependencies installed successfully"
+        volumeMounts:
+        - name: extra-packages
+          mountPath: /opt/extra-packages
+      # Copy pipelines from ConfigMap to writable directory
+      - name: copy-pipelines
+        image: {{ .Values.hayhooks.image }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Copying pipelines to writable directory..."
+          cp -rL /pipelines-src/* /pipelines/
+          echo "Pipelines copied:"
+          find /pipelines -type f
+        volumeMounts:
+        - name: pipelines-src
+          mountPath: /pipelines-src
+        - name: pipelines
+          mountPath: /pipelines
+      containers:
+      - name: hayhooks
+        image: {{ .Values.hayhooks.image }}
+        securityContext:
+          runAsUser: 0
+        command:
+        - /bin/sh
+        - -c
+        - |
+          apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+          # Configure git to use token for GitHub
+          if [ -n "$GITHUB_TOKEN" ]; then
+            git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
+          hayhooks mcp run --host 0.0.0.0 --port 1417 --pipelines-dir /pipelines &
+          exec hayhooks run
+        ports:
+        - name: api
+          containerPort: 1416
+          protocol: TCP
+        - name: mcp
+          containerPort: 1417
+          protocol: TCP
+        env:
+        {{- if .Values.vault.enabled }}
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "haystack.fullname" . }}-github
+              key: GITHUB_TOKEN
+        {{- end }}
+        - name: HAYHOOKS_PIPELINES_DIR
+          value: "/pipelines"
+        - name: HAYHOOKS_HOST
+          value: "0.0.0.0"
+        - name: HAYHOOKS_PORT
+          value: "1416"
+        - name: HAYHOOKS_MCP_HOST
+          value: "0.0.0.0"
+        - name: HAYHOOKS_MCP_PORT
+          value: "1417"
+        # Milvus connection
+        - name: MILVUS_HOST
+          value: "{{ include "haystack.fullname" . }}-milvus"
+        - name: MILVUS_PORT
+          value: "19530"
+        # Ollama connection
+        - name: OLLAMA_BASE_URL
+          value: "{{ .Values.ollama.baseURL }}"
+        - name: OLLAMA_EMBEDDING_MODEL
+          value: "{{ .Values.ollama.embeddingModel }}"
+        # Add init container packages to Python path
+        - name: PYTHONPATH
+          value: "/opt/extra-packages"
+        - name: NLTK_DATA
+          value: "/opt/extra-packages/nltk_data"
+        volumeMounts:
+        - name: pipelines
+          mountPath: /pipelines
+        - name: repos
+          mountPath: /repos
+        - name: extra-packages
+          mountPath: /opt/extra-packages
+        resources:
+          {{- toYaml .Values.hayhooks.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: api
+          initialDelaySeconds: 120
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: api
+          initialDelaySeconds: 60
+          periodSeconds: 5
+      volumes:
+      # ConfigMap with pipeline source code (read-only)
+      - name: pipelines-src
+        configMap:
+          name: {{ include "haystack.fullname" . }}-pipelines
+          items:
+          - key: git_indexer_pipeline_wrapper.py
+            path: git_indexer/pipeline_wrapper.py
+          - key: rag_query_pipeline_wrapper.py
+            path: rag_query/pipeline_wrapper.py
+      # Writable directory for pipelines (copied from ConfigMap by init container)
+      - name: pipelines
+        emptyDir: {}
+      - name: repos
+        {{- if .Values.storage.repos.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "haystack.fullname" . }}-repos
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+      - name: extra-packages
+        emptyDir: {}

@@ -1,0 +1,6 @@
+dependencies:
+- name: tailscale-operator
+  repository: https://pkgs.tailscale.com/helmcharts
+  version: 1.98.4
+digest: sha256:d246de545a29799888f42d2a7b3a98cca84b6cea51ec36fd63c7f5e254d1b6ee
+generated: "2026-06-01T04:43:09.511795604Z"

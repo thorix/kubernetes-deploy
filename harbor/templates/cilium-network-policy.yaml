@@ -1,0 +1,497 @@
+{{- if .Values.networkPolicy.enabled }}
+# Harbor CiliumNetworkPolicy
+# Components: nginx (entrypoint), core (API), portal (UI), registry,
+#             jobservice, database (postgres), redis, trivy
+#
+# Traffic flow:
+#   Gateway/Runners → nginx → core/portal
+#   core → registry, trivy, database, redis, jobservice
+#   jobservice → core, redis
+#   registry → core, redis
+#   core/jobservice → internet (proxy cache pulls)
+#   trivy → internet (vuln DB updates)
+
+---
+# nginx - the only externally-facing component
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-nginx
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: nginx
+  ingress:
+    # Gateway API (Cilium ingress identity)
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # ARC runners pushing images
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: arc-runners
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # PostSync setup Job (same namespace, no harbor component label)
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+            batch.kubernetes.io/job-name: harbor-proxy-cache-setup
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Kubelet health probes
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # nginx → core (API, v2 registry, token service)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # nginx → portal (UI)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: portal
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# core - API server, central coordinator
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-core
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: core
+  ingress:
+    # From nginx (reverse proxy)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: nginx
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # From jobservice (callbacks)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # From registry (token validation)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: registry
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # core → registry (image operations)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: registry
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+    # core → trivy (vulnerability scanning)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: trivy
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # core → database
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # core → redis
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # core → jobservice
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # core → internet (proxy cache upstream pulls)
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# portal - web UI (no egress needed, serves static files)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-portal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: portal
+  ingress:
+    # From nginx only
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: nginx
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress: []
+
+---
+# registry - Docker V2 registry + registryctl
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: registry
+  ingress:
+    # From core (image operations, registryctl)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+    # From jobservice (replication, garbage collection)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # registry → core (token validation)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # registry → redis
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# jobservice - async task runner
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-jobservice
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: jobservice
+  ingress:
+    # From core (job dispatch)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # jobservice → core (callbacks, API calls)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # jobservice → registry (replication, GC)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: registry
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+    # jobservice → redis (task queue)
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # jobservice → database
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # jobservice → internet (proxy cache upstream pulls, replication)
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+
+---
+# database - PostgreSQL (no egress needed)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-database
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: database
+  ingress:
+    # From core
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # From jobservice
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress: []
+
+---
+# redis - cache and task queue (no egress needed)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: redis
+  ingress:
+    # From core, jobservice, registry
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: registry
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+  egress: []
+
+---
+# trivy - vulnerability scanner
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: harbor-trivy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: harbor
+      component: trivy
+  ingress:
+    # From core (scan requests)
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # trivy → internet (vulnerability DB updates)
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # DNS
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+{{- end }}

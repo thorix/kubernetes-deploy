@@ -1,0 +1,117 @@
+# HolmesGPT configuration
+# AI-powered root cause analysis for Kubernetes alerts
+# Uses local Ollama for LLM inference (no external API calls)
+
+logLevel: INFO
+replicas: 1
+
+# Disable telemetry
+sentryDSN: ""
+enableAccountsCreate: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+# CRD permissions for operators we use
+crdPermissions:
+  argo: true
+  flux: false
+  kafka: false
+  keda: false
+  crossplane: false
+  istio: false
+  gatewayApi: true
+  velero: false
+  externalSecrets: false
+
+# AI model configuration - Ollama (local)
+# NOTE: Ollama tool-calling is experimental per HolmesGPT docs.
+# If results are poor, consider switching to Anthropic Claude.
+# See: https://holmesgpt.dev/ai-providers/ollama/
+additionalEnvVars:
+- name: OLLAMA_API_BASE
+  value: "http://ollama.ollama.svc.cluster.local:11434"
+# Synced from Vault (kv/holmesgpt/mcp-gateway) via health-checks companion chart
+- name: MCP_GATEWAY_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: holmesgpt-mcp-gateway
+      key: MCP_GATEWAY_TOKEN
+
+modelList:
+  ollama-qwen25:
+    model: "ollama_chat/qwen2.5:32b"
+    temperature: 0
+
+# MCP Gateway - provides ArgoCD, OPNsense, and Haystack RAG tools
+# Connects to the MCP Context Forge gateway (all registered servers)
+mcp_servers:
+  ops-gateway:
+    description: "MCP gateway providing ArgoCD, OPNsense, and Haystack RAG tools for cluster operations"
+    config:
+      url: "http://mcp-gateway-mcpgateway.mcp-gateway.svc.cluster.local/sse"
+      mode: "sse"
+      extra_headers:
+        Authorization: "Bearer {{ env.MCP_GATEWAY_TOKEN }}"
+      verify_ssl: false
+
+# Toolsets - data sources for investigations
+toolsets:
+  kubernetes/core:
+    enabled: true
+  kubernetes/logs:
+    enabled: true
+  prometheus/metrics:
+    enabled: true
+    config:
+      prometheus_url: "http://victoriametrics-victoria-metrics-single-server.victoriametrics.svc:8428"
+  grafana/loki:
+    enabled: true
+    config:
+      api_url: "http://loki.victoriametrics.svc:3100"
+  argocd:
+    enabled: false  # Using MCP gateway for ArgoCD access instead
+  robusta:
+    enabled: false
+  internet:
+    enabled: false
+  runbook:
+    enabled: true
+  bash:
+    enabled: true
+    config:
+      builtin_allowlist: "extended"
+
+# Disable all cloud MCP addons
+mcpAddons:
+  aws:
+    enabled: false
+  mariadb:
+    enabled: false
+  gcp:
+    enabled: false
+  azure:
+    enabled: false
+  github:
+    enabled: false
+  sentry:
+    enabled: false
+  prefect:
+    enabled: false
+  kubernetesRemediation:
+    enabled: false
+  confluenceMcp:
+    enabled: false
+
+# Holmes Operator - enables scheduled/automatic investigations
+operator:
+  enabled: true
+  logLevel: INFO
+  holmesApiTimeout: 300
+  maxHistoryItems: 10
+  cleanupCompletedChecks: true
+  completedCheckTTLHours: 48

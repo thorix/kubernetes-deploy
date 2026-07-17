@@ -1,0 +1,114 @@
+# Hubble UI - observability dashboard for Cilium
+# Two-container pod: backend (gRPC to Hubble Relay) + frontend (nginx UI)
+
+# Backend container - queries Hubble Relay for flow data
+image:
+  repository: quay.io/cilium/hubble-ui-backend
+  tag: "v0.13.5"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Backend listens on gRPC port 8090
+containerPort: 8090
+
+# Service exposes the frontend on port 80
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Hubble UI"
+    gethomepage.dev/description: "Cilium network observability"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "cilium.png"
+    gethomepage.dev/href: "https://hubble.lan"
+
+httproute:
+  enabled: false
+
+serviceAccount:
+  create: true
+  # Pod reads k8s API (ClusterRole in hubble-ui chart watches pods/services/CNPs).
+  automountServiceAccountToken: true
+
+# Backend env: point to Hubble Relay in kube-system
+env:
+- name: EVENTS_SERVER_PORT
+  value: "8090"
+- name: FLOWS_API_ADDR
+  value: "hubble-relay.kube-system.svc.cluster.local:80"
+
+# Nginx config for the frontend - serves UI from / and proxies API to backend
+configMap:
+  enabled: true
+  mountPath: /etc/nginx/conf.d
+  files:
+    default.conf: |
+      server {
+          listen 8080;
+          server_name localhost;
+          root /app;
+          index index.html;
+
+          location / {
+              try_files $uri $uri/ /index.html;
+          }
+
+          location /api {
+              proxy_pass http://localhost:8090;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+          }
+      }
+
+# Frontend sidecar container - nginx serving Hubble UI
+extraContainers:
+- name: frontend
+  image: "quay.io/cilium/hubble-ui:v0.13.5"
+  imagePullPolicy: IfNotPresent
+  ports:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+  env:
+  - name: BACKEND_API
+    value: "localhost:8090"
+  volumeMounts:
+  - name: config
+    mountPath: /etc/nginx/conf.d
+    readOnly: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+# Probes target the backend on port 8090 (TCP since it's gRPC)
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: 8090
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    type: tcp
+    port: 8090
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

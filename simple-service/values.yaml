@@ -1,0 +1,289 @@
+# simple-service default values
+# All optional features are disabled by default
+
+# Workload type: Deployment, StatefulSet, or CronJob
+workloadType: Deployment
+
+# Container image configuration
+image:
+  repository: nginx
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Container command (overrides ENTRYPOINT)
+command: []
+# - /bin/sh
+
+# Container args (overrides CMD)
+args: []
+# - -c
+# - "echo hello"
+
+# Replica count
+replicaCount: 1
+
+# Deployment strategy
+strategy: {}
+# type: Recreate
+# -- or --
+# type: RollingUpdate
+# rollingUpdate:
+#   maxSurge: 1
+#   maxUnavailable: 0
+
+# Container port (the port your application listens on)
+# For single port services, use containerPort
+containerPort: 8080
+
+# For multiple ports, use ports array instead of containerPort
+# ports:
+# - name: http
+#   containerPort: 8080
+#   protocol: TCP
+# - name: metrics
+#   containerPort: 9090
+#   protocol: TCP
+
+# Pod hostname (optional, useful for stateful apps)
+hostname: ""
+
+# RuntimeClassName for specialized node configurations (e.g., GPU workloads)
+# Example: "nvidia" for NVIDIA GPU nodes
+runtimeClassName: ""
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  # targetPort defaults to containerPort if not set
+  targetPort: ""
+  # nodePort for NodePort service type
+  nodePort: ""
+  annotations: {}
+  # For multiple ports, use ports array
+  # ports:
+  # - name: http
+  #   port: 80
+  #   targetPort: 8080
+  #   protocol: TCP
+  # - name: metrics
+  #   port: 9090
+  #   targetPort: 9090
+  #   nodePort: 30090  # optional, for NodePort type
+  #   protocol: TCP
+
+# HTTPRoute configuration (Gateway API)
+httproute:
+  enabled: false
+  hostname: ""
+  # Backend port (defaults to first service port or service.port)
+  port: ""
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+  # Additional hostnames
+  additionalHostnames: []
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Whether the SA token is mounted into the pod. Default is false — most apps
+  # read secrets via envFrom/secretRef (VSO-synced) and never call the K8s API.
+  # Set true for apps that use the in-pod K8s client (e.g. homepage, hubble-ui)
+  # or do direct Vault Kubernetes auth with the default token.
+  automountServiceAccountToken: false
+
+# ConfigMap for environment variables or config files
+configMap:
+  enabled: false
+  # Key-value pairs for environment variables
+  data: {}
+  # Mount as files instead of env vars
+  mountPath: ""
+  # Specific files to mount (if mountPath is set)
+  files: {}
+
+# Resource limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Probes configuration
+probes:
+  enabled: true
+  liveness:
+    # Probe type: "http" (default) or "tcp"
+    type: http
+    # For http: path to check, for tcp: not used
+    path: /
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    # Probe type: "http" (default) or "tcp"
+    type: http
+    # For http: path to check, for tcp: not used
+    path: /
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Environment variables (in addition to configMap)
+env: []
+# - name: FOO
+#   value: bar
+
+# Environment variables from secrets/configmaps
+envFrom: []
+# - secretRef:
+#     name: my-secret
+# - configMapRef:
+#     name: my-config
+
+# Additional volume mounts
+volumeMounts: []
+# - name: data
+#   mountPath: /data
+
+# Additional volumes
+volumes: []
+# - name: data
+#   persistentVolumeClaim:
+#     claimName: my-pvc
+
+# Simple persistent storage (creates PVC automatically)
+# For more complex storage, use persistentVolumes or volumes
+persistence:
+  enabled: false
+  # Mount path in container
+  mountPath: /data
+  # Storage size
+  size: 10Gi
+  # Storage class (empty for default)
+  storageClass: ""
+  # Access modes
+  accessModes:
+    - ReadWriteOnce
+
+# Persistent Volumes (creates PV and PVC pairs)
+# Useful for SMB/NFS mounts or static volumes
+persistentVolumes: []
+# - name: media
+#   capacity: 10Ti
+#   accessModes:
+#     - ReadOnlyMany
+#   csi:
+#     driver: smb.csi.k8s.io
+#     readOnly: true
+#     volumeAttributes:
+#       source: "//server/share"
+#     nodeStageSecretRef:
+#       name: smb-creds
+#   mountOptions:
+#     - dir_mode=0755
+#     - file_mode=0644
+
+# Volume Claim Templates (for StatefulSet workloadType)
+# Creates PVC per replica with automatic naming
+volumeClaimTemplates: []
+# - name: data
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: longhorn
+#   size: 10Gi
+
+# Extra containers (sidecars)
+extraContainers: []
+
+# Init containers
+initContainers: []
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity: {}
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}
+
+# Security context for pod
+podSecurityContext: {}
+# fsGroup: 1000
+
+# Security context for container
+securityContext: {}
+# runAsNonRoot: true
+# runAsUser: 1000
+
+# Name overrides
+nameOverride: ""
+fullnameOverride: ""
+
+# Vault integration for secrets management
+vault:
+  enabled: false
+  # Vault server address
+  address: "http://vault.vault.svc.cluster.local:8200"
+  # Skip TLS verification (for dev/self-signed certs)
+  skipTLSVerify: true
+  # KV secrets engine mount path
+  mount: "kv"
+  # How often to refresh secrets
+  refreshAfter: "1h"
+  # Kubernetes auth configuration
+  kubernetes:
+    # Auth mount path in Vault
+    mountPath: "kubernetes"
+    # Vault role name (defaults to release name)
+    role: ""
+    # Service account for auth (defaults to chart's service account)
+    serviceAccount: ""
+    # JWT audience
+    audience: "vault"
+    # Token TTL in seconds
+    tokenTTL: 86400
+  # Secrets to sync from Vault
+  # Each entry creates a VaultStaticSecret and adds read permissions to the policy
+  # Key is the secret name suffix, value is the Vault path
+  secrets: {}
+  # Example:
+  # secrets:
+  #   config: "myapp/config"      # Creates secret: <release>-config from kv/data/myapp/config
+  #   credentials: "myapp/creds"  # Creates secret: <release>-credentials from kv/data/myapp/creds
+
+# CronJob configuration (only used when workloadType: CronJob)
+cronjob:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  restartPolicy: OnFailure
+
+# CiliumNetworkPolicy configuration
+networkPolicy:
+  enabled: false
+  egress:
+    denyAll: false
+    allowDNS: true
+    customRules: []
+  ingress:
+    gatewayOnly: false
+    customRules: []

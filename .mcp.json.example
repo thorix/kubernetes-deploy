@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "mcp-gateway": {
+      "type": "sse",
+      "url": "https://mcp.lan/sse",
+      "headers": {
+        "Authorization": "Bearer <YOUR_JWT_TOKEN>"
+      }
+    },
+    "haystack-rag": {
+      "type": "sse",
+      "url": "http://haystack.rye:1417/sse"
+    }
+  }
+}

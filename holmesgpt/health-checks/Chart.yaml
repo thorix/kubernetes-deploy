@@ -1,0 +1,4 @@
+apiVersion: v2
+name: holmesgpt-health-checks
+description: ScheduledHealthCheck CRDs for HolmesGPT AI-powered investigations
+version: 1.0.0

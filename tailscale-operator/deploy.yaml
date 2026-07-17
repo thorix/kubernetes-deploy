@@ -1,0 +1,7 @@
+# tailscale-operator deployment
+
+namespace: tailscale
+
+helm:
+- valuesFiles:
+  - values.yaml

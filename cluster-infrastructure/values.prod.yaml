@@ -1,0 +1,117 @@
+# Production values for cluster-infrastructure
+
+httpsGateway:
+  enabled: true
+  name: https-gateway
+  namespace: kube-system
+  gatewayClassName: cilium
+  httpRedirect: false
+  listeners:
+    - name: https-internal
+      hostname: "*.rye"
+      certificateSecretName: https-gateway-tls
+    - name: https-example
+      hostname: "*.lan"
+      certificateSecretName: wildcard-example-io-tls
+  certificates:
+    - name: https-gateway-cert
+      secretName: https-gateway-tls
+      clusterIssuer: selfsigned-ca-issuer
+      duration: 8760h
+      renewBefore: 720h
+      dnsNames:
+        - "*.rye"
+        - "localhost"
+
+rbac:
+  enabled: true
+
+amdGpu:
+  enabled: true
+  image:
+    repository: rocm/k8s-device-plugin
+    tag: latest
+    pullPolicy: IfNotPresent
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+
+namespaces:
+  enabled: true
+  configs:
+    # CSI drivers require privileged access for mounting volumes on hosts
+    - name: csi-driver-smb
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Frigate requires privileged for GPU access (hostPath /dev/dri) and privileged securityContext
+    - name: frigate
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Longhorn requires privileged for storage operations on host disks
+    - name: longhorn-system
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Ollama requires privileged for GPU access (hostPath /dev/dri) and privileged securityContext
+    - name: ollama
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # llama-cpp requires privileged for GPU access (hostPath /dev/dri)
+    - name: llama-cpp
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Plex requires privileged for hostPath volumes and memory-backed transcoding
+    - name: plex
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Tailscale operator requires privileged for network device management
+    - name: tailscale
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # VictoriaMetrics namespace needs privileged for blackbox exporter ICMP (NET_RAW)
+    - name: victoriametrics
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # ARC runners need privileged for Docker-in-Docker (DinD) container builds
+    - name: arc-runners
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # ARC systems namespace for the controller
+    - name: arc-systems
+      labels:
+        pod-security.kubernetes.io/enforce: privileged
+        pod-security.kubernetes.io/audit: privileged
+        pod-security.kubernetes.io/warn: privileged
+
+    # Vault config operator - baseline is sufficient
+    - name: vault-config-operator
+      labels:
+        pod-security.kubernetes.io/enforce: baseline
+        pod-security.kubernetes.io/audit: baseline
+        pod-security.kubernetes.io/warn: baseline

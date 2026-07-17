@@ -1,0 +1,33 @@
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Vault connection settings
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+
+  # How vault-config-operator authenticates to Vault
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+
+  # Policy name in Vault
+  name: {{ .Release.Name }}
+
+  # HCL policy definition
+  policy: |
+    # Allow reading SMB credentials
+    path "kv/data/{{ .Values.smb.vaultPath }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow listing secrets (for metadata)
+    path "kv/metadata/{{ .Values.smb.vaultPath }}" {
+      capabilities = ["read", "list"]
+    }

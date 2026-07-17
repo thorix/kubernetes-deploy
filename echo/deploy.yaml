@@ -1,0 +1,9 @@
+# echo deployment
+# HTTP echo service for debugging - returns request data as JSON
+
+namespace: echo
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../echo/values.yaml

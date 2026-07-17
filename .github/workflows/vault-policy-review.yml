@@ -1,0 +1,75 @@
+name: Vault Policy Review Required
+
+on:
+  pull_request:
+    paths:
+      - '**/templates/vault-policy.yaml'
+      - '**/templates/vault-auth-role.yaml'
+
+jobs:
+  review-required:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+
+      - name: Check for policy changes
+        run: |
+          echo "::warning::This PR modifies Vault policies and requires manual review"
+          echo ""
+          echo "Vault policy changes detected. Please review carefully:"
+          echo ""
+          git diff origin/${{ github.base_ref }} HEAD -- '**/templates/vault-policy.yaml' '**/templates/vault-auth-role.yaml'
+
+      - name: Policy review checklist
+        run: |
+          echo "Review Checklist:"
+          echo "- [ ] Policies follow least-privilege principle"
+          echo "- [ ] Only necessary Vault paths are granted access"
+          echo "- [ ] Capabilities are minimal (read vs write vs list)"
+          echo "- [ ] Policies are properly scoped to application namespace"
+          echo "- [ ] No wildcards unless absolutely necessary"
+          echo "- [ ] Auth roles bind to correct service accounts"
+
+      - name: Require manual approval
+        uses: trstringer/manual-approval@fa642940caf8412403569b28b2db4a1df08a83a3  # v1
+        with:
+          approvers: ${{ github.repository_owner }}
+          minimum-approvals: 1
+          issue-title: "Vault Policy Review Required for PR #${{ github.event.pull_request.number }}"
+          issue-body: |
+            ## Vault Policy Review Required
+
+            This PR modifies Vault policies and requires manual approval.
+
+            **PR:** #${{ github.event.pull_request.number }}
+            **Author:** @${{ github.event.pull_request.user.login }}
+            **Branch:** `${{ github.head_ref }}`
+
+            ### Review Checklist
+
+            Please verify the following before approving:
+
+            - [ ] Policies follow **least-privilege** principle
+            - [ ] Only necessary Vault paths are granted access
+            - [ ] Capabilities are minimal (prefer `read` over `write`, `list` only when needed)
+            - [ ] Policies are scoped to application namespace
+            - [ ] No dangerous wildcards (e.g., `path "kv/*"` is too broad)
+            - [ ] Auth roles bind to correct service accounts and namespaces
+            - [ ] Token TTL is reasonable (24h default)
+
+            ### Changed Files
+
+            The following Vault policy files were modified:
+
+            ```
+            ${{ github.event.pull_request.changed_files }}
+            ```
+
+            **View diff:** ${{ github.event.pull_request.html_url }}/files
+
+            ### Approval
+
+            To approve, comment on this issue with: `/approve`
+
+            **Note:** After approval, the PR can be merged and ArgoCD will automatically sync the policies to Vault.

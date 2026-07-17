@@ -1,0 +1,62 @@
+# Schedules chosen to not overlap with other backup jobs. All times are in
+# the timeZone specified below.
+#   02:00 — immich's internal pg_dump
+#   03:00 — immich-backup-verify + vrestic (immich library to backup target)
+#   04:00 — paperless pg_dump (this chart)
+#   05:00 — paperless-backup-verify (this chart)
+#   06:00 — vrestic (paperless docs + DB dumps to backup target)
+#   10:00 — longhorn daily-backup
+
+timeZone: "UTC"
+
+dump:
+  schedule: "0 4 * * *"
+  image:
+    repository: postgres
+    tag: "17-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+verify:
+  schedule: "0 5 * * *"
+  image:
+    repository: alpine
+    tag: "3.23"
+    pullPolicy: IfNotPresent
+  # Minimum acceptable backup size (bytes). Paperless DB is small; 50KB floor.
+  minSizeBytes: 51200
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+
+# Postgres connection (used by the dump cronjob)
+postgres:
+  host: paperless-postgres.paperless.svc.cluster.local
+  port: 5432
+  database: paperless
+  # Secret synced from vault path paperless/postgres by the postgres simple-service chart
+  secretName: paperless-postgres-postgres
+
+backup:
+  mountPath: /backup
+  # Subdirectory of the SMB share to read/write
+  subPath: "backups"
+
+smb:
+  # Real NAS share + vault path are environment-specific -> private overlay
+  # (rye/paperless/values.yaml, which this db-backup source also consumes). Placeholder here.
+  source: "//nas.lan/paperless"
+  secretName: paperless-simple-service-smbcreds
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000

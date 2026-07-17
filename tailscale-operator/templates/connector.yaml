@@ -1,0 +1,22 @@
+{{- if .Values.connector.enabled }}
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: {{ .Values.connector.hostname }}
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  hostname: {{ .Values.connector.hostname }}
+  acceptRoutes: {{ .Values.connector.acceptRoutes | default false }}
+  subnetRouter:
+    advertiseRoutes:
+      {{- range .Values.connector.routes }}
+      - {{ . }}
+      {{- end }}
+  {{- if .Values.connector.tags }}
+  tags:
+    {{- range .Values.connector.tags }}
+    - {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}

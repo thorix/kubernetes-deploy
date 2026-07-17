@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  serviceName: {{ .Release.Name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      securityContext:
+        runAsUser: {{ .Values.audiobookshelf.uid }}
+        runAsGroup: {{ .Values.audiobookshelf.gid }}
+        fsGroup: {{ .Values.audiobookshelf.fsGroup }}
+      containers:
+      - name: audiobookshelf
+        image: {{ .Values.audiobookshelf.image }}
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        env:
+        - name: TZ
+          value: {{ .Values.audiobookshelf.timezone | quote }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+        resources:
+          {{- toYaml .Values.audiobookshelf.resources | nindent 10 }}
+        volumeMounts:
+        - name: config-metadata
+          subPath: config
+          mountPath: /config
+        - name: config-metadata
+          subPath: metadata
+          mountPath: /metadata
+        - name: data
+          subPath: audiobooks
+          mountPath: /audiobooks
+        - name: data
+          subPath: podcasts
+          mountPath: /podcasts
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-data
+  volumeClaimTemplates:
+  - metadata:
+      name: config-metadata
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: {{ .Values.audiobookshelf.storage.configMetadataStorageClass }}
+      resources:
+        requests:
+          storage: {{ .Values.audiobookshelf.storage.configMetadataSize }}

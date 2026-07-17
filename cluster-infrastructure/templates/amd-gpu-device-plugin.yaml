@@ -1,0 +1,50 @@
+{{- if .Values.amdGpu.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: amdgpu-device-plugin-daemonset
+  namespace: kube-system
+  labels:
+    {{- include "cluster-infrastructure.labels" . | nindent 4 }}
+    app.kubernetes.io/component: amd-gpu-device-plugin
+spec:
+  selector:
+    matchLabels:
+      name: amdgpu-dp-ds
+  template:
+    metadata:
+      labels:
+        name: amdgpu-dp-ds
+        app.kubernetes.io/component: amd-gpu-device-plugin
+    spec:
+      restartPolicy: Always
+      nodeSelector:
+        {{- toYaml .Values.amdGpu.nodeSelector | nindent 8 }}
+      priorityClassName: system-node-critical
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      {{- with .Values.amdGpu.tolerations }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      containers:
+      - image: "{{ .Values.amdGpu.image.repository }}:{{ .Values.amdGpu.image.tag }}"
+        name: amdgpu-dp-cntr
+        imagePullPolicy: {{ .Values.amdGpu.image.pullPolicy }}
+        securityContext:
+          privileged: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: dp
+            mountPath: /var/lib/kubelet/device-plugins
+          - name: sys
+            mountPath: /sys
+      volumes:
+        - name: dp
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: sys
+          hostPath:
+            path: /sys
+{{- end }}

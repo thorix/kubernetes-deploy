@@ -1,0 +1,25 @@
+# cilium deployment
+# Bootstrap: ./deploy.sh
+# Then ArgoCD adopts via this deploy.yaml
+
+namespace: kube-system
+syncWave: "-10"
+
+ignoreDifferences:
+- group: ""
+  kind: Secret
+  name: cilium-ca
+  jsonPointers:
+  - /data
+- group: ""
+  kind: Secret
+  name: hubble-server-certs
+  jsonPointers:
+  - /data
+
+helm:
+- chart: cilium
+  repoURL: https://helm.cilium.io/
+  targetRevision: "1.19.3"
+  valuesFiles:
+  - cilium/values.yaml

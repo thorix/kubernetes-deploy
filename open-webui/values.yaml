@@ -1,0 +1,77 @@
+# Open WebUI - using simple-service chart
+# User-friendly web interface for LLMs
+
+image:
+  repository: ghcr.io/open-webui/open-webui
+  tag: "v0.9.1"
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+
+# Recreate strategy for single-replica with PVC
+strategy:
+  type: Recreate
+
+# Environment variables for backend configuration
+env:
+- name: OLLAMA_BASE_URL
+  value: "http://ollama.ollama.svc.cluster.local:11434"
+- name: OPENAI_API_BASE_URL
+  value: "http://llama-cpp-service.llama.svc.cluster.local:8080/v1"
+- name: OPENAI_API_KEY
+  value: "not-needed"
+- name: PORT
+  value: "8080"
+
+# Health probes
+probes:
+  enabled: true
+  liveness:
+    path: /health
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: /health
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Persistent storage for user data
+persistence:
+  enabled: true
+  mountPath: /app/backend/data
+  size: 10Gi
+  storageClass: longhorn
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Open WebUI"
+    gethomepage.dev/description: "LLM web interface"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "open-webui.png"
+    gethomepage.dev/href: "https://open-webui.lan"
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""
+  gateway:
+    name: http-gateway
+    namespace: kube-system

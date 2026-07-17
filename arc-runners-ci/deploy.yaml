@@ -1,0 +1,11 @@
+namespace: arc-runners
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../arc-runners-ci/values.vault.yaml
+- chart: gha-runner-scale-set
+  repoURL: ghcr.io/actions/actions-runner-controller-charts
+  targetRevision: "0.14.0"
+  valuesFiles:
+  - arc-runners-ci/values.yaml

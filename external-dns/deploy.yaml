@@ -1,0 +1,8 @@
+namespace: external-dns
+
+helm:
+- chart: external-dns
+  repoURL: https://kubernetes-sigs.github.io/external-dns/
+  targetRevision: "1.21.1"
+  valuesFiles:
+  - external-dns/values.yaml

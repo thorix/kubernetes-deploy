@@ -1,0 +1,33 @@
+{{- if and .Values.vault.enabled .Values.vault.secrets }}
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+  name: {{ include "simple-service.fullname" . }}
+  policy: |
+    {{- range $key, $path := .Values.vault.secrets }}
+    # Allow reading {{ $key }} secret
+    path "{{ $.Values.vault.mount }}/data/{{ $path }}" {
+      capabilities = ["read"]
+    }
+    path "{{ $.Values.vault.mount }}/metadata/{{ $path }}" {
+      capabilities = ["read", "list"]
+    }
+    {{- end }}
+    {{- with .Values.vault.extraPolicy }}
+{{ . | indent 4 }}
+    {{- end }}
+{{- end }}

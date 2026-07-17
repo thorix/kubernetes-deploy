@@ -1,0 +1,71 @@
+# Echo service - values for simple-service chart
+
+image:
+  repository: mendhak/http-https-echo
+  tag: "40"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Echo server listens on port 8080
+containerPort: 8080
+
+# Service configuration
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# HTTPRoute - disabled by default, enabled in values.prod.yaml
+httproute:
+  enabled: false
+  hostname: ""
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+
+# ServiceAccount
+serviceAccount:
+  create: true
+
+# Resources
+resources:
+  limits:
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Environment variables
+env:
+  - name: HTTP_PORT
+    value: "8080"
+
+# Probes
+probes:
+  enabled: true
+  liveness:
+    path: /
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Security context - restrictive settings
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000

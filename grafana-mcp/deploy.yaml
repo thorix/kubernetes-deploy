@@ -1,0 +1,8 @@
+# grafana-mcp deployment using simple-service chart
+
+namespace: grafana-mcp
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../grafana-mcp/values.yaml

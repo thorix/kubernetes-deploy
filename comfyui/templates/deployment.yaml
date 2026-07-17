@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "comfyui.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "comfyui.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "comfyui.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "comfyui.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.gpu.enabled }}
+      {{- if .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.gpu.runtimeClassName }}
+      {{- end }}
+      {{- if .Values.gpu.tolerations }}
+      tolerations:
+        {{- toYaml .Values.gpu.tolerations | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      containers:
+      - name: comfyui
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        {{- if .Values.env }}
+        env:
+          {{- toYaml .Values.env | nindent 10 }}
+        {{- end }}
+        {{- if .Values.extraArgs }}
+        args:
+          {{- toYaml .Values.extraArgs | nindent 10 }}
+        {{- end }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: {{ .Values.resources.requests.cpu }}
+            memory: {{ .Values.resources.requests.memory }}
+            {{- if .Values.gpu.enabled }}
+            {{- if eq .Values.gpu.type "nvidia" }}
+            nvidia.com/gpu: {{ .Values.gpu.count }}
+            {{- else if eq .Values.gpu.type "amd" }}
+            amd.com/gpu: {{ .Values.gpu.count }}
+            {{- end }}
+            {{- end }}
+          limits:
+            cpu: {{ .Values.resources.limits.cpu }}
+            memory: {{ .Values.resources.limits.memory }}
+            {{- if .Values.gpu.enabled }}
+            {{- if eq .Values.gpu.type "nvidia" }}
+            nvidia.com/gpu: {{ .Values.gpu.count }}
+            {{- else if eq .Values.gpu.type "amd" }}
+            amd.com/gpu: {{ .Values.gpu.count }}
+            {{- end }}
+            {{- end }}
+        volumeMounts:
+        {{- if .Values.persistence.enabled }}
+        - name: models
+          mountPath: {{ .Values.persistence.models.mountPath }}
+        - name: outputs
+          mountPath: {{ .Values.persistence.outputs.mountPath }}
+        {{- end }}
+      volumes:
+      {{- if .Values.persistence.enabled }}
+      - name: models
+        persistentVolumeClaim:
+          claimName: {{ include "comfyui.fullname" . }}-models
+      - name: outputs
+        persistentVolumeClaim:
+          claimName: {{ include "comfyui.fullname" . }}-outputs
+      {{- end }}

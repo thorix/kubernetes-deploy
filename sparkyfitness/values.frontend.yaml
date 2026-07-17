@@ -1,0 +1,108 @@
+# SparkyFitness — frontend (nginx). User-facing entrypoint; reverse-proxies
+# /api, /uploads, /health-data to the server. Runs non-root and templates its
+# nginx config at startup, so several paths must be writable (emptyDir).
+
+# nameOverride (not fullnameOverride) so the selector label is unique per
+# instance -> sparkyfitness-frontend. See values.postgres.yaml for why.
+nameOverride: frontend
+
+image:
+  repository: codewithcj/sparkyfitness
+  tag: "v0.17.0"
+
+containerPort: 80
+
+podSecurityContext:
+  fsGroup: 1000
+
+env:
+# Must equal the public HTTPS URL. Placeholder; real value in overlay.
+- name: SPARKY_FITNESS_FRONTEND_URL
+  value: "https://sparkyfitness.lan"
+- name: SPARKY_FITNESS_SERVER_HOST
+  value: "sparkyfitness-server"
+- name: SPARKY_FITNESS_SERVER_PORT
+  value: "3010"
+
+service:
+  port: 80
+
+httproute:
+  enabled: true
+  # Placeholder hostname — real host lives in the config overlay.
+  hostname: sparkyfitness.lan
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "SparkyFitness"
+    gethomepage.dev/description: "Nutrition & fitness tracker"
+    gethomepage.dev/group: "Health"
+    gethomepage.dev/icon: "mdi-dumbbell"
+
+probes:
+  enabled: true
+  liveness:
+    path: /
+    port: http
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: /
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+
+# Writable scratch dirs required by the non-root nginx image.
+volumes:
+- name: nginx-tmp
+  emptyDir: {}
+- name: nginx-cache
+  emptyDir: {}
+- name: nginx-run
+  emptyDir: {}
+- name: nginx-conf
+  emptyDir: {}
+
+volumeMounts:
+- name: nginx-tmp
+  mountPath: /tmp
+- name: nginx-cache
+  mountPath: /var/cache/nginx
+- name: nginx-run
+  mountPath: /run
+- name: nginx-conf
+  mountPath: /etc/nginx/conf.d
+
+# Network policy: ingress only from the gateway; egress default-deny except DNS
+# and the server. The browser (not this pod) fetches external assets, so the
+# frontend needs no internet egress.
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: true
+  egress:
+    denyAll: true
+    allowDNS: true
+    customRules:
+    - toEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: server
+          app.kubernetes.io/instance: sparkyfitness
+      toPorts:
+      - ports:
+        - port: "3010"
+          protocol: TCP

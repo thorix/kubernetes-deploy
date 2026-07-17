@@ -1,0 +1,5 @@
+namespace: frost-alert
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../frost-alert/values.yaml

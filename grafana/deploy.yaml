@@ -1,0 +1,18 @@
+namespace: victoriametrics
+
+ignoreDifferences:
+- group: ""
+  kind: Secret
+  name: grafana
+  jsonPointers:
+  - /data/admin-password
+  - /data/admin-user
+- group: apps
+  kind: Deployment
+  name: grafana
+  jsonPointers:
+  - /spec/template/metadata/annotations/checksum~1secret
+
+helm:
+- valuesFiles:
+  - values.yaml

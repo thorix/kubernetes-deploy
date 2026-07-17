@@ -1,0 +1,15 @@
+{{- if .Values.minio.enabled }}
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: minio
+  namespace: longhorn-system
+  labels:
+    {{- include "longhorn.labels" . | nindent 4 }}
+spec:
+  endpoints:
+  - dnsName: {{ .Values.minio.hostname }}
+    recordType: A
+    targets:
+    - {{ .Values.minio.ip }}
+{{- end }}

@@ -1,0 +1,13 @@
+{{- if .Values.vault.enabled }}
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: {{ .Release.Name }}-connection
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harbor-local.labels" . | nindent 4 }}
+spec:
+  address: {{ .Values.vault.address }}
+  skipTLSVerify: {{ .Values.vault.skipTLSVerify }}
+{{- end }}

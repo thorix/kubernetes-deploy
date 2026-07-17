@@ -1,0 +1,6 @@
+apiVersion: v2
+name: librechat
+description: LibreChat - Open source AI chat platform with Anthropic and local model support
+type: application
+version: 0.1.0
+appVersion: "0.7.6"

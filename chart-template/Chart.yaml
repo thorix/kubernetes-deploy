@@ -1,0 +1,13 @@
+apiVersion: v2
+name: CHANGEME
+description: CHANGEME - describe what this application does
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+# Uncomment to add chart dependencies
+# dependencies:
+#   - name: subchart-name
+#     version: "1.0.0"
+#     repository: https://charts.example.com
+#     condition: subchart.enabled

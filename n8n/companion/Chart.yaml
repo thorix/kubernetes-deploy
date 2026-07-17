@@ -1,0 +1,4 @@
+apiVersion: v2
+name: n8n-companion
+description: Vault integration and supporting resources for n8n deployment
+version: 1.0.0

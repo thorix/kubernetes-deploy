@@ -1,0 +1,7 @@
+namespace: hubble-ui
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../hubble-ui/values.yaml
+- path: hubble-ui

@@ -1,0 +1,126 @@
+# Harbor local container registry
+# Gateway API configuration for HTTPRoute
+
+gateway:
+  name: https-gateway
+  namespace: kube-system
+
+# Hostname is environment-specific - set in values.prod.yaml
+hostname: ""
+
+# Proxy cache - pull-through cache for upstream registries
+# Configured via PostSync Job that calls Harbor API
+proxyCache:
+  enabled: true
+  registries:
+    - name: dockerhub
+      type: docker-hub
+      url: https://hub.docker.com
+      project: dockerhub-cache
+    - name: ghcr
+      type: github-ghcr
+      url: https://ghcr.io
+      project: ghcr-cache
+
+# Network policy - per-component CiliumNetworkPolicy
+networkPolicy:
+  enabled: true
+
+# Vault integration for Harbor admin password
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 1h
+  secrets:
+    admin: harbor/admin
+  kubernetes:
+    mountPath: kubernetes
+    role: harbor
+    serviceAccount: default
+    audience: vault
+
+# Harbor subchart configuration
+harbor:
+  expose:
+    type: clusterIP
+    clusterIP:
+      name: harbor
+    tls:
+      enabled: false
+
+  existingSecretAdminPassword: harbor-admin
+  existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+
+  externalURL: https://harbor.lan
+
+  persistence:
+    enabled: true
+    resourcePolicy: "keep"
+    persistentVolumeClaim:
+      registry:
+        storageClass: longhorn
+        size: 50Gi
+      database:
+        storageClass: longhorn
+        size: 5Gi
+      redis:
+        storageClass: longhorn
+        size: 1Gi
+      trivy:
+        storageClass: longhorn
+        size: 5Gi
+
+  # Internal database (PostgreSQL)
+  database:
+    type: internal
+
+  # Internal Redis
+  redis:
+    type: internal
+
+  # Trivy vulnerability scanner
+  trivy:
+    enabled: true
+
+  # Resource limits
+  core:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+  portal:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+  registry:
+    registry:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+    controller:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+
+  jobservice:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

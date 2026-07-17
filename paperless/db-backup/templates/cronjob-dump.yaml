@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: paperless-db-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: paperless-db-backup
+spec:
+  schedule: {{ .Values.dump.schedule | quote }}
+  timeZone: {{ .Values.timeZone | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            # Use the simple-service name so the postgres ingress allow rule
+            # (matches app.kubernetes.io/name=simple-service) lets us through.
+            app.kubernetes.io/name: simple-service
+            app.kubernetes.io/component: db-backup
+            app.kubernetes.io/instance: paperless-db-backup
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: dump
+            image: "{{ .Values.dump.image.repository }}:{{ .Values.dump.image.tag }}"
+            imagePullPolicy: {{ .Values.dump.image.pullPolicy }}
+            env:
+            - name: PGHOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secretName }}
+                  key: POSTGRES_PASSWORD
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -euo pipefail
+              BACKUP_DIR="{{ .Values.backup.mountPath }}"
+              mkdir -p "${BACKUP_DIR}"
+              PG_VERSION=$(pg_dump --version | awk '{print $3}')
+              STAMP=$(date +%Y%m%dT%H%M%S)
+              OUT="${BACKUP_DIR}/paperless-db-backup-${STAMP}-pg${PG_VERSION}.sql.gz"
+              echo "Dumping ${PGDATABASE} from ${PGHOST}:${PGPORT} to ${OUT}"
+              pg_dump --format=plain --no-owner --no-acl \
+                | gzip -c \
+                > "${OUT}"
+              SIZE=$(stat -c%s "${OUT}")
+              echo "Wrote ${OUT} (${SIZE} bytes)"
+              # Prune dumps older than 14 days so the SMB share doesn't fill up
+              find "${BACKUP_DIR}" -maxdepth 1 -name "paperless-db-backup-*.sql.gz" -type f -mtime +14 -print -delete 2>/dev/null || true
+            resources:
+              {{- toYaml .Values.dump.resources | nindent 14 }}
+            volumeMounts:
+            - name: backup
+              mountPath: {{ .Values.backup.mountPath }}
+              subPath: {{ .Values.backup.subPath }}
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: paperless-db-backup-smb

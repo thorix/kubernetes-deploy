@@ -1,0 +1,36 @@
+# Base values for Vault Config Operator
+# Manages Vault configuration (policies, auth methods, secret engines) as Kubernetes CRDs
+# Works with existing Vault instance - does NOT deploy Vault itself
+
+# Subchart values
+vault-config-operator:
+  replicaCount: 1
+
+  image:
+    repository: quay.io/redhat-cop/vault-config-operator
+    pullPolicy: IfNotPresent
+    # tag defaults to appVersion
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  # Disable monitoring if you don't have Prometheus Operator installed
+  # Set to true if you have ServiceMonitor CRD available
+  enableMonitoring: false
+
+  # Enable if you have cert-manager installed and want auto-generated certs
+  # Otherwise the operator will use self-signed certs
+  enableCertManager: false
+
+  podSecurityContext:
+    runAsNonRoot: true
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - "ALL"

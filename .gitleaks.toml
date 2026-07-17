@@ -1,0 +1,36 @@
+# gitleaks config — keeps real SECRETS out of this public repo (tokens, keys,
+# passwords, JWTs, cloud creds). Used by both the CI block
+# (.github/workflows/secret-scan.yml) and the local pre-commit hook.
+#
+# Division of labor: gitleaks = secrets. Environment-specific values (domains,
+# private IPs, timezones) are handled by scripts/hygiene_lint.py, which is
+# allowlist-based and public-safe — so they are intentionally NOT gitleaks rules
+# here (a domain/IP regex just produced false positives on placeholders).
+
+title = "kubernetes-deploy secret scan"
+
+[extend]
+# All of gitleaks' built-in rules: API keys, cloud creds, private keys, JWTs, etc.
+useDefault = true
+
+[allowlist]
+description = "Placeholders and vendored/example files — not real secrets"
+regexes = [
+  '''YOUR_[A-Z_]+''',
+  '''your-[a-z-]+''',
+  '''[Cc]hangeme[a-z-]*''',
+  '''CHANGEME''',
+  '''<[A-Z_a-z -]+>''',
+]
+paths = [
+  '''.*\.example$''',
+  '''.*/README\.md$''',
+  '''^README\.md$''',
+  # Vendored/upstream Helm charts — third-party, and their docs carry example
+  # key/domain markers (e.g. "-----BEGIN … PRIVATE KEY-----" in comments) that
+  # are not our secrets. Not ours to scan.
+  '''argocd/argo-cd/.*''',
+  '''.*/charts/.*''',
+  # Scaffolding chart with intentional example values.
+  '''chart-template/.*''',
+]

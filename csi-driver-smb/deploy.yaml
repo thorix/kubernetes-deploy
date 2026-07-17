@@ -1,0 +1,7 @@
+# csi-driver-smb deployment
+
+namespace: csi-driver-smb
+
+helm:
+- valuesFiles:
+  - values.yaml

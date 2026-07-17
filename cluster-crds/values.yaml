@@ -1,0 +1,18 @@
+# Centralized CRD management for operators that don't include CRDs in charts
+
+# Vault Operator (bank-vaults) CRDs
+vaultOperator:
+  enabled: true
+  # Version should match vault-operator appVersion
+  version: v1.22.3
+  crds:
+    - vaults.vault.banzaicloud.com
+    - vaultpolicies.vault.banzaicloud.com
+    - vaultauthroles.vault.banzaicloud.com
+
+# Add more operators here as needed
+# example:
+#   enabled: false
+#   version: v1.0.0
+#   crds:
+#     - resources.example.com

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: hubble-ui-rbac
+description: RBAC for Hubble UI service account
+version: 1.0.0

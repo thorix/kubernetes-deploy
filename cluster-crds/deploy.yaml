@@ -1,0 +1,7 @@
+# cluster-crds deployment
+
+namespace: default
+
+helm:
+- valuesFiles:
+  - values.yaml

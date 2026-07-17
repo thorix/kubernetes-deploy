@@ -1,0 +1,8 @@
+# cloudflare-tunnel deployment using simple-service chart
+
+namespace: cloudflare-tunnel
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../cloudflare-tunnel/values.yaml

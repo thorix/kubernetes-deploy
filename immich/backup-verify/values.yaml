@@ -1,0 +1,31 @@
+schedule: "0 3 * * *"  # Daily at 3 AM (1 hour after Immich's 2 AM backup)
+
+image:
+  repository: alpine
+  tag: "3.23"
+  pullPolicy: IfNotPresent
+
+# Minimum acceptable backup size (bytes). Real dumps are ~17MB.
+minSizeBytes: 10240  # 10KB
+
+backup:
+  mountPath: /backup
+  # Path within the SMB share where Immich writes backups
+  subPath: "backups"
+
+smb:
+  # Real NAS share is environment-specific -> private overlay (rye/immich/values.yaml).
+  source: "//nas.lan/immich"
+  secretName: immich-server-smbcreds
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    memory: 32Mi

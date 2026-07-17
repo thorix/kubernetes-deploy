@@ -1,0 +1,14 @@
+# Deployment configuration for argocd (ArgoCD self-management)
+# This enables ArgoCD to manage itself via GitOps after initial bootstrap
+
+namespace: argocd
+
+helm:
+- valuesFiles:
+  - values.yaml
+
+ignoreDifferences:
+- kind: Secret
+  name: argocd-secret
+  jsonPointers:
+  - /data

@@ -1,0 +1,132 @@
+grafana:
+  plugins:
+    - fetzerch-sunandmoon-datasource
+
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClassName: longhorn
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  service:
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: "Grafana"
+      gethomepage.dev/description: "Metrics dashboards"
+      gethomepage.dev/group: "Monitoring"
+      gethomepage.dev/icon: "grafana.png"
+      gethomepage.dev/href: "https://grafana.lan"
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+      - name: VictoriaMetrics
+        type: prometheus
+        url: http://victoriametrics-victoria-metrics-single-server:8428
+        access: proxy
+        isDefault: true
+      - name: Alertmanager
+        type: alertmanager
+        url: http://vmalert-victoria-metrics-alert-alertmanager:9093
+        access: proxy
+        jsonData:
+          implementation: prometheus
+      - name: Loki
+        type: loki
+        url: http://loki.victoriametrics.svc:3100
+        access: proxy
+
+  # Sidecar watches for ConfigMaps labeled grafana_dashboard=1
+  # and provisions them as dashboards automatically
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      folder: /tmp/dashboards
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: false
+        allowUiUpdates: true
+        # Keep dashboards in the DB even when their source ConfigMap is removed.
+        # This lets us stop shipping dashboard JSON from git (they carry personal
+        # data) and let them live in the backed-up Grafana DB instead. Removing a
+        # dashboard's ConfigMap then leaves it as an editable DB-owned dashboard.
+        disableDelete: true
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: default
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+      - name: sidecar
+        orgId: 1
+        folder: 'Custom'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /tmp/dashboards
+
+  # Community dashboards from grafana.net (provisioned via default provider)
+  dashboards:
+    default:
+      node-exporter:
+        gnetId: 1860
+        revision: 37
+        datasource: VictoriaMetrics
+      kubernetes-cluster:
+        gnetId: 6417
+        revision: 1
+        datasource: VictoriaMetrics
+      blackbox-exporter:
+        gnetId: 7587
+        revision: 3
+        datasource: VictoriaMetrics
+      loki:
+        gnetId: 14055
+        revision: 5
+        datasource: Loki
+      argocd:
+        gnetId: 14584
+        revision: 1
+        datasource: VictoriaMetrics
+      cilium:
+        gnetId: 16611
+        revision: 1
+        datasource: VictoriaMetrics
+      victoriametrics:
+        gnetId: 10229
+        revision: 22
+        datasource: VictoriaMetrics
+      immich:
+        gnetId: 22555
+        revision: 1
+        datasource: VictoriaMetrics
+
+  grafana.ini:
+    paths:
+      data: /var/lib/grafana/
+      logs: /var/log/grafana
+      plugins: /var/lib/grafana/plugins
+      provisioning: /etc/grafana/provisioning
+    analytics:
+      check_for_updates: false
+    log:
+      mode: console
+    server:
+      root_url: https://grafana.lan

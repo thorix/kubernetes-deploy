@@ -1,0 +1,98 @@
+# SparkyFitness — PostgreSQL database
+#
+# Postgres 18 declares /var/lib/postgresql as a VOLUME, so we mount the Longhorn
+# volume there (not /data) and pin PGDATA to a clean subdirectory. Mounting the
+# parent keeps the Longhorn ext4 "lost+found" out of initdb's target directory.
+
+workloadType: StatefulSet
+# nameOverride (not fullnameOverride): drives BOTH the resource name
+# (-> sparkyfitness-postgres, since the release name doesn't contain "postgres")
+# AND the selector label app.kubernetes.io/name=postgres. All three instances
+# share the release name, so without a unique name they'd share selectors and
+# every Service would target every pod.
+nameOverride: postgres
+
+image:
+  repository: postgres
+  tag: "18.3-alpine"
+
+containerPort: 5432
+
+# Alpine postgres runs as uid/gid 70; ensure the volume is group-writable.
+podSecurityContext:
+  fsGroup: 70
+
+env:
+- name: POSTGRES_DB
+  value: "sparkyfitness_db"
+- name: PGDATA
+  value: /var/lib/postgresql/data
+
+# POSTGRES_USER / POSTGRES_PASSWORD come from Vault (synced secret below).
+envFrom:
+- secretRef:
+    name: sparkyfitness-postgres-postgres
+
+service:
+  port: 5432
+
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+serviceAccount:
+  create: true
+
+# Longhorn volume for the database. Size is a placeholder — real size in overlay.
+volumeClaimTemplates:
+- name: data
+  mountPath: /var/lib/postgresql
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 5Gi
+
+vault:
+  enabled: true
+  kubernetes:
+    # Unique Vault auth role — defaults to the (shared) release name otherwise.
+    role: sparkyfitness-postgres
+  secrets:
+    # Keys at this path: POSTGRES_USER, POSTGRES_PASSWORD
+    postgres: "sparkyfitness/postgres"
+
+# Network policy: only the server may reach Postgres; Postgres has no egress.
+# (Kubelet health probes from the node are permitted by Cilium by default.)
+networkPolicy:
+  enabled: true
+  ingress:
+    customRules:
+    - fromEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: server
+          app.kubernetes.io/instance: sparkyfitness
+      toPorts:
+      - ports:
+        - port: "5432"
+          protocol: TCP
+  egress:
+    denyAll: true
+    allowDNS: false

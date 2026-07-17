@@ -1,0 +1,56 @@
+# Cloudflare Tunnel - using simple-service chart
+# Cloudflare Zero Trust Tunnel for secure ingress to the cluster
+
+image:
+  repository: cloudflare/cloudflared
+  tag: "2026.5.2"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# Cloudflared command arguments
+args:
+- tunnel
+- --no-autoupdate
+- --management-diagnostics=false
+- --protocol
+- http2
+- run
+
+# Environment variable from Vault secret
+env:
+- name: TUNNEL_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: cloudflare-tunnel-simple-service-token
+      key: token
+
+# No service needed - cloudflared is outbound only
+service:
+  enabled: false
+
+# No health probes - cloudflared doesn't expose HTTP
+probes:
+  enabled: false
+
+# Vault integration for tunnel token
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  mount: "kv"
+  refreshAfter: "1h"
+  kubernetes:
+    mountPath: "kubernetes"
+    role: "cloudflare-tunnel"
+    audience: "vault"
+    tokenTTL: 86400
+  secrets:
+    token: "cloudflare/tunnel-credentials"
+
+# Resource limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

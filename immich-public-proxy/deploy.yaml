@@ -1,0 +1,8 @@
+# immich-public-proxy deployment using simple-service chart
+
+namespace: immich
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../immich-public-proxy/values.yaml

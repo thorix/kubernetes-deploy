@@ -1,0 +1,18 @@
+{{- if .Values.vault.enabled }}
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: {{ include "health-checks.fullname" . }}-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "health-checks.labels" . | nindent 4 }}
+spec:
+  vaultConnectionRef: {{ include "health-checks.fullname" . }}-connection
+  method: kubernetes
+  mount: {{ .Values.vault.kubernetes.mountPath }}
+  kubernetes:
+    role: {{ .Values.vault.kubernetes.role }}
+    serviceAccount: {{ .Values.vault.kubernetes.serviceAccount }}
+    audiences:
+      - {{ .Values.vault.kubernetes.audience }}
+{{- end }}

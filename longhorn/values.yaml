@@ -1,0 +1,110 @@
+# Base values for Longhorn on Talos Linux
+# All longhorn subchart values are nested under "longhorn:"
+
+# Gateway configuration for HTTPRoute
+gateway:
+  name: http-gateway
+  namespace: kube-system
+
+# Hostname is environment-specific - set in values.<env>.yaml
+hostname: ""
+
+# MinIO on NAS - external-dns creates DNS record for minio hostname
+minio:
+  enabled: true
+  hostname: minio.lan
+  # Real NAS IP is environment-specific -> private overlay (rye/longhorn/values.yaml).
+  # 192.0.2.x is the RFC5737 documentation range (placeholder, never routed).
+  ip: "192.0.2.9"
+  port: 9000
+
+# Vault integration for backup credentials
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: "1h"
+  kubernetes:
+    mountPath: kubernetes
+    role: longhorn
+    serviceAccount: longhorn-service-account
+    audience: vault
+    tokenTTL: 86400
+  secrets:
+    backup: longhorn/backup
+
+# Longhorn subchart configuration
+longhorn:
+  # Persistence configuration for Talos
+  persistence:
+    # IMPORTANT: On Talos, Longhorn data must be stored at /var/mnt/longhorn
+    # This path persists across Talos upgrades
+    defaultDataPath: /var/mnt/longhorn
+    # Retain volumes when PVC is deleted so data isn't lost on accidental deletes
+    reclaimPolicy: Retain
+
+  # Default backup store (S3 via MinIO on NAS)
+  defaultBackupStore:
+    backupTarget: "s3://longhorn-backups@us-east-1/"
+    backupTargetCredentialSecret: "longhorn-backup"
+
+  # Default settings
+  defaultSettings:
+    # Number of replicas per volume (2 for redundancy)
+    defaultReplicaCount: 2
+
+    # Create default storage class
+    createDefaultDiskLabeledNodes: true
+
+    # Use all nodes for storage
+    defaultDataLocality: disabled
+
+    # Talos-specific: No iSCSI support required
+    taintToleration: ""
+
+  # Service configuration
+  service:
+    ui:
+      type: ClusterIP
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Longhorn"
+        gethomepage.dev/description: "Distributed block storage"
+        gethomepage.dev/group: "Infrastructure"
+        gethomepage.dev/icon: "longhorn.png"
+        gethomepage.dev/href: "https://longhorn.lan"
+
+  # Ingress disabled - we'll use HTTPRoute instead
+  ingress:
+    enabled: false
+
+  # Pre-upgrade checker - MUST be disabled for ArgoCD/GitOps deployments
+  preUpgradeChecker:
+    jobEnabled: false
+    upgradeVersionCheck: true
+
+  # Resources for Longhorn components
+  longhornManager:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  longhornDriver:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+  longhornUI:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

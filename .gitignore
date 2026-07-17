@@ -1,0 +1,30 @@
+# Local Claude Code config (personal settings, permission allowlist, MCP approvals)
+.claude/
+
+# MCP client config (contains a bearer token)
+.mcp.json
+
+# Local secrets / cluster access — never commit these
+.env
+.env.*
+*.env
+kubeconfig
+*.kubeconfig
+*.pem
+*.key
+
+# Helm dependency tarballs - ArgoCD runs helm dependency build during sync
+**/charts/*.tgz
+grafana/charts/
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Backups
+*.bak
+*.orig

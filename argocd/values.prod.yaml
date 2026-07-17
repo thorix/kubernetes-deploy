@@ -1,0 +1,98 @@
+# Production environment values for ArgoCD
+# These values override the defaults in deployment/values.yaml
+
+# Production cluster-infrastructure pulls main branch with prod overrides.
+clusterInfrastructure:
+  targetRevision: main
+  prodValuesFile: "values.prod.yaml"
+
+# Production-specific ApplicationSet configuration
+applicationSet:
+  enabled: true
+  generator:
+    revision: main
+    # Add prod values file to all applications
+    prodValuesFile: "values.prod.yaml"
+    configRepoURL: https://github.com/YOUR_ORG/kubernetes-config.git
+    clusterName: rye
+
+# Custom HTTPRoute using port 443 (h2c) - supports both HTTP and gRPC over HTTP/2
+httproute:
+  enabled: true
+  parentRefs:
+    - name: https-gateway
+      namespace: kube-system
+  hostnames:
+    - argocd.lan
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "ArgoCD"
+    gethomepage.dev/description: "GitOps continuous delivery"
+    gethomepage.dev/group: "Infrastructure"
+    gethomepage.dev/icon: "argo-cd.png"
+    gethomepage.dev/href: "https://argocd.lan"
+
+# GRPCRoute no longer needed - HTTPRoute on port 443 (h2c) handles
+# both web UI and gRPC/gRPC-web through a single route
+grpcRoute:
+  enabled: false
+
+# ArgoCD subchart configuration for production
+argocd:
+  global:
+    domain: argocd.lan
+
+  # Production server configuration
+  server:
+    replicas: 2
+
+    # Use ClusterIP with HTTPRoute for TLS
+    service:
+      type: ClusterIP
+      # Signal HTTP/2 cleartext for gRPC upstream (used by GRPCRoute via port 443)
+      servicePortHttpsAppProtocol: kubernetes.io/h2c
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "ArgoCD"
+        gethomepage.dev/description: "GitOps continuous delivery"
+        gethomepage.dev/group: "Infrastructure"
+        gethomepage.dev/icon: "argo-cd.png"
+        gethomepage.dev/href: "https://argocd.lan"
+
+    # Disable subchart HTTPRoute - using custom template with h2c port instead
+    httproute:
+      enabled: false
+
+    resources:
+      limits:
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  # Production controller configuration
+  controller:
+    replicas: 1
+
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+  # Production repo server configuration
+  repoServer:
+    replicas: 2
+
+    resources:
+      limits:
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  # Disable Redis secret init hook since the secret already exists
+  # This prevents lingering hook resources from causing Degraded health status
+  redisSecretInit:
+    enabled: false

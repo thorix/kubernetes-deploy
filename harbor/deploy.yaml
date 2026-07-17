@@ -1,0 +1,7 @@
+# harbor deployment - local container registry
+
+namespace: harbor
+
+helm:
+- valuesFiles:
+  - values.yaml

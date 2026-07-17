@@ -1,0 +1,8 @@
+# argocd-mcp deployment using simple-service chart
+
+namespace: argocd-mcp
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../argocd-mcp/values.yaml

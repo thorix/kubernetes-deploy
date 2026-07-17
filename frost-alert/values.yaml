@@ -1,0 +1,110 @@
+image:
+  repository: harbor.lan/library/frost-alert
+  tag: "v0.1.7"
+
+containerPort: 8080
+
+args:
+  - "--config=/etc/frost-alert/config.yaml"
+  - "--state=/var/lib/frost-alert/state.json"
+  - "--http-addr=:8080"
+
+strategy:
+  type: Recreate
+
+configMap:
+  enabled: true
+  mountPath: /etc/frost-alert
+  files:
+    config.yaml: |
+      thresholds:
+        alert_low_f: 36.0
+        trend_lookahead_h: 3
+        forecast_deviation_f: 2.0
+      windows:
+        forecast_lookahead_h: 24
+        tonight_alert_h: 12
+        resend_after_h: 24
+        evening_alert_start: "19:45"
+        evening_alert_end: "20:15"
+        heads_up_cutoff_h: 18
+      active_windows:
+        - start: "2026-04-01"
+          end:   "2026-06-15"
+        - start: "2026-09-01"
+          end:   "2026-10-31"
+      sensor:
+        query_current: 'avg_over_time({__name__="sensor.gw2000b_outdoor_temperature_value"}[5m])'
+        query_trend:   '{__name__="sensor.gw2000b_outdoor_temperature_value"}[1h]'
+        query_dewpoint: 'avg_over_time({__name__="sensor.gw2000b_dewpoint_value"}[5m])'
+        staleness_threshold_m: 30
+      forecast:
+        poll_interval_in_season:  "30m"
+        poll_interval_off_season: "60m"
+      quiet_hours:
+        start: "21:00"
+        end:   "07:00"
+        send_morning_summary: true
+      notifiers:
+        slack:
+          enabled: true
+
+persistence:
+  enabled: true
+  mountPath: /var/lib/frost-alert
+  size: 100Mi
+
+vault:
+  enabled: true
+  secrets:
+    secrets: "frost-alert/secrets"
+
+envFrom:
+  - secretRef:
+      name: frost-alert-simple-service-secrets
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+probes:
+  enabled: true
+  liveness:
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 60
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+podSecurityContext:
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+
+httproute:
+  enabled: false

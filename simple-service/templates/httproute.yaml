@@ -1,0 +1,38 @@
+{{- $enabled := ((.Values.httproute).enabled) | default false -}}
+{{- $hostname := ((.Values.httproute).hostname) | default "" -}}
+{{- if and $enabled $hostname }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+  {{- with (.Values.httproute).annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - name: {{ (.Values.httproute.gateway).name | default "https-gateway" }}
+      namespace: {{ (.Values.httproute.gateway).namespace | default "kube-system" }}
+  hostnames:
+    - {{ $hostname | quote }}
+    {{- range (.Values.httproute).additionalHostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "simple-service.fullname" . }}
+          {{- if (.Values.httproute).port }}
+          port: {{ (.Values.httproute).port }}
+          {{- else if (.Values.service).ports }}
+          port: {{ (index (.Values.service).ports 0).port }}
+          {{- else }}
+          port: {{ (.Values.service).port | default 80 }}
+          {{- end }}
+{{- end }}

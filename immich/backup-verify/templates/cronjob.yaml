@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-backup-verify-smb
+  labels:
+    app.kubernetes.io/name: immich-backup-verify
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    {{- toYaml .Values.smb.mountOptions | nindent 4 }}
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeHandle: immich-backup-verify-smb
+    volumeAttributes:
+      source: {{ .Values.smb.source | quote }}
+    nodeStageSecretRef:
+      name: {{ .Values.smb.secretName }}
+      namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-backup-verify-smb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: immich-backup-verify
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  volumeName: immich-backup-verify-smb
+  storageClassName: ""
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: immich-backup-verify
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: immich-backup-verify
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  timeZone: {{ .Values.timeZone | default "UTC" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: immich-backup-verify
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: verify
+            image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            imagePullPolicy: {{ .Values.image.pullPolicy }}
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -e
+              TODAY=$(date +%Y%m%d)
+              BACKUP_DIR="{{ .Values.backup.mountPath }}"
+              MIN_SIZE={{ .Values.minSizeBytes }}
+
+              echo "Checking for Immich backup from today (${TODAY})..."
+
+              # Find today's backup file (pattern: immich-db-backup-YYYYMMDDT*.sql.gz)
+              BACKUP=$(find "${BACKUP_DIR}" -maxdepth 1 -name "immich-db-backup-${TODAY}T*.sql.gz" -type f 2>/dev/null | head -1)
+
+              if [ -z "${BACKUP}" ]; then
+                echo "ERROR: No backup file found for today (${TODAY})"
+                echo "Files in backup directory:"
+                ls -lh "${BACKUP_DIR}"/immich-db-backup-*.sql.gz 2>/dev/null | tail -5 || echo "  (none)"
+                exit 1
+              fi
+
+              FILE_SIZE=$(stat -c%s "${BACKUP}")
+              echo "Found: $(basename ${BACKUP}) (${FILE_SIZE} bytes)"
+
+              if [ "${FILE_SIZE}" -lt "${MIN_SIZE}" ]; then
+                echo "ERROR: Backup is too small (${FILE_SIZE} < ${MIN_SIZE} bytes)"
+                exit 1
+              fi
+
+              echo "OK: Backup verified (${FILE_SIZE} bytes, minimum ${MIN_SIZE})"
+            resources:
+              {{- toYaml .Values.resources | nindent 14 }}
+            volumeMounts:
+            - name: backup
+              mountPath: {{ .Values.backup.mountPath }}
+              subPath: {{ .Values.backup.subPath }}
+              readOnly: true
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: immich-backup-verify-smb

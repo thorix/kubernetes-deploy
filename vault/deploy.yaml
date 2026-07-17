@@ -1,0 +1,7 @@
+# vault deployment
+
+namespace: vault
+
+helm:
+- valuesFiles:
+  - values.yaml

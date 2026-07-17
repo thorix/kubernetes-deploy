@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-data
+  namespace: {{ .Release.Namespace }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""  # Empty to use static PV without storageClass
+  resources:
+    requests:
+      storage: {{ .Values.smb.media.capacity }}
+  volumeName: {{ .Release.Name }}-data

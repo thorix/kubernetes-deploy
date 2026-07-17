@@ -1,0 +1,30 @@
+{{- if and .Values.vault.enabled .Values.vault.secrets }}
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ include "companion.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "companion.labels" . | nindent 4 }}
+spec:
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+  name: {{ include "companion.fullname" . }}
+  policy: |
+    {{- range $key, $path := .Values.vault.secrets }}
+    # Allow reading {{ $key }} secret
+    path "{{ $.Values.vault.mount }}/data/{{ $path }}" {
+      capabilities = ["read"]
+    }
+    path "{{ $.Values.vault.mount }}/metadata/{{ $path }}" {
+      capabilities = ["read", "list"]
+    }
+    {{- end }}
+{{- end }}

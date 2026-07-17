@@ -1,0 +1,16 @@
+# n8n workflow automation platform
+# Queue mode: main app + workers + webhook processor + Valkey + PostgreSQL
+# MCP integration: client (connect to gateway) + server (expose workflows as tools)
+
+namespace: n8n
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../n8n/values.postgres.yaml
+- chart: n8n
+  repoURL: 8gears.container-registry.com/library
+  targetRevision: "2.0.1"
+  valuesFiles:
+  - n8n/values.yaml
+- path: n8n/companion

@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "haystack.fullname" . }}-indexer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "haystack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: indexer
+spec:
+  schedule: {{ .Values.indexer.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "haystack.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: indexer
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: indexer
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              API_URL="http://{{ include "haystack.fullname" . }}-hayhooks:{{ .Values.service.apiPort }}"
+
+              echo "Starting repository indexing..."
+              {{- range .Values.repositories }}
+              echo "Indexing {{ .name }} ({{ .url }})..."
+              curl -sf -X POST "${API_URL}/git_indexer/run" \
+                -H "Content-Type: application/json" \
+                -d '{"repo_url": "{{ .url }}", "branch": "{{ .branch | default "main" }}"}'
+              echo ""
+              echo "✓ {{ .name }} indexed successfully"
+              {{- end }}
+
+              echo "All repositories indexed!"
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi

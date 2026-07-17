@@ -1,0 +1,12 @@
+# hello-world deployment
+# Static "Hello World" page using nginx via simple-service chart
+
+namespace: hello-world
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../hello-world/values.yaml
+  fileParameters:
+  - name: "configMap.files.index\\.html"
+    path: ../hello-world/index.html

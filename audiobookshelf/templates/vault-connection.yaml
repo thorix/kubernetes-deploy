@@ -1,0 +1,8 @@
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: {{ .Release.Name }}-connection
+  namespace: {{ .Release.Namespace }}
+spec:
+  address: {{ .Values.vault.address }}
+  skipTLSVerify: {{ .Values.vault.skipTLSVerify }}

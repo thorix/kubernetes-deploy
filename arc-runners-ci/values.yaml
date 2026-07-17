@@ -1,0 +1,36 @@
+# GitHub Actions Runner Scale Set registered to your target repository.
+# Registered to the calling repo so reusable workflows from your CI repo
+# can route here (GitHub routes jobs to the calling repo's runners).
+
+controllerServiceAccount:
+  name: arc-systems-gha-rs-controller
+  namespace: arc-systems
+
+githubConfigUrl: "https://github.com/YOUR_ORG/YOUR_REPO"
+githubConfigSecret: arc-github-app
+
+minRunners: 0
+maxRunners: 5
+
+containerMode:
+  type: "dind"
+
+template:
+  spec:
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:2.334.0
+      command: ["/home/runner/run.sh"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: false
+        runAsNonRoot: true
+        runAsUser: 1001
+      resources:
+        requests:
+          cpu: 500m
+          memory: 512Mi
+        limits:
+          memory: 4Gi

@@ -1,0 +1,21 @@
+# Cluster Infrastructure Configuration
+
+rbac:
+  enabled: true
+
+amdGpu:
+  enabled: false
+  image:
+    repository: rocm/k8s-device-plugin
+    tag: latest
+    pullPolicy: IfNotPresent
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+
+httpsGateway:
+  enabled: false
+
+namespaces:
+  enabled: false
+  configs: []

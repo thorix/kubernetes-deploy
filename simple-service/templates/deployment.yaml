@@ -1,0 +1,192 @@
+{{- if eq (.Values.workloadType | default "Deployment") "Deployment" }}
+{{- $configMapEnabled := ((.Values.configMap).enabled) | default false -}}
+{{- $configMapMountPath := ((.Values.configMap).mountPath) | default "" -}}
+{{- $probesEnabled := ((.Values.probes).enabled) | default false -}}
+{{- $serviceAccountCreate := ((.Values.serviceAccount).create) | default false -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "simple-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "simple-service.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .Values.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: {{ .Values.dnsPolicy | default "ClusterFirstWithHostNet" }}
+      {{- end }}
+      {{- if .Values.hostname }}
+      hostname: {{ .Values.hostname }}
+      {{- end }}
+      {{- if .Values.runtimeClassName }}
+      runtimeClassName: {{ .Values.runtimeClassName }}
+      {{- end }}
+      {{- if $serviceAccountCreate }}
+      serviceAccountName: {{ include "simple-service.serviceAccountName" . }}
+      {{- end }}
+      automountServiceAccountToken: {{ ((.Values.serviceAccount).automountServiceAccountToken) | default false }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "simple-service.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- if .Values.ports }}
+            {{- toYaml .Values.ports | nindent 12 }}
+            {{- else }}
+            - name: http
+              containerPort: {{ .Values.containerPort | default 8080 }}
+              protocol: TCP
+            {{- end }}
+          {{- if $probesEnabled }}
+          {{- with .Values.probes.startup }}
+          startupProbe:
+            {{- if eq (.type | default "http") "tcp" }}
+            tcpSocket:
+              port: {{ .port }}
+            {{- else }}
+            httpGet:
+              path: {{ .path }}
+              port: {{ .port }}
+            {{- end }}
+            periodSeconds: {{ .periodSeconds | default 10 }}
+            timeoutSeconds: {{ .timeoutSeconds | default 5 }}
+            failureThreshold: {{ .failureThreshold | default 30 }}
+          {{- end }}
+          livenessProbe:
+            {{- if eq (.Values.probes.liveness.type | default "http") "tcp" }}
+            tcpSocket:
+              port: {{ .Values.probes.liveness.port }}
+            {{- else }}
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.probes.liveness.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            {{- if eq (.Values.probes.readiness.type | default "http") "tcp" }}
+            tcpSocket:
+              port: {{ .Values.probes.readiness.port }}
+            {{- else }}
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.probes.readiness.port }}
+            {{- end }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds | default 3 }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.envFrom (and $configMapEnabled (not $configMapMountPath)) }}
+          envFrom:
+            {{- if and $configMapEnabled (not $configMapMountPath) }}
+            - configMapRef:
+                name: {{ include "simple-service.fullname" . }}
+            {{- end }}
+            {{- with .Values.envFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if or .Values.volumeMounts (and $configMapEnabled $configMapMountPath) ((.Values.persistence).enabled) }}
+          volumeMounts:
+            {{- if and $configMapEnabled $configMapMountPath }}
+            - name: config
+              mountPath: {{ $configMapMountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if ((.Values.persistence).enabled) }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath | default "/data" }}
+            {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.volumes (and $configMapEnabled $configMapMountPath) .Values.persistentVolumes ((.Values.persistence).enabled) }}
+      volumes:
+        {{- if and $configMapEnabled $configMapMountPath }}
+        - name: config
+          configMap:
+            name: {{ include "simple-service.fullname" . }}
+            {{- with (.Values.configMap).defaultMode }}
+            defaultMode: {{ . }}
+            {{- end }}
+        {{- end }}
+        {{- if ((.Values.persistence).enabled) }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "simple-service.fullname" . }}-data
+        {{- end }}
+        {{- range .Values.persistentVolumes }}
+        - name: {{ .name }}
+          persistentVolumeClaim:
+            claimName: {{ include "simple-service.fullname" $ }}-{{ .name }}
+        {{- end }}
+        {{- with .Values.volumes }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

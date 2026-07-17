@@ -1,0 +1,7 @@
+# vault-config-operator deployment
+
+namespace: vault-config-operator
+
+helm:
+- valuesFiles:
+  - values.yaml

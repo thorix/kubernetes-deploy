@@ -1,0 +1,8 @@
+# open-webui deployment using simple-service chart
+
+namespace: open-webui
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../open-webui/values.yaml

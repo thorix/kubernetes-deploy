@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-db-backup-smb
+  labels:
+    app.kubernetes.io/name: paperless-db-backup
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    {{- toYaml .Values.smb.mountOptions | nindent 4 }}
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeHandle: paperless-db-backup-smb
+    volumeAttributes:
+      source: {{ .Values.smb.source | quote }}
+    nodeStageSecretRef:
+      name: {{ .Values.smb.secretName }}
+      namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-db-backup-smb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: paperless-db-backup
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  volumeName: paperless-db-backup-smb
+  storageClassName: ""

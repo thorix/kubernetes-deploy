@@ -1,0 +1,20 @@
+{{- if ((.Values.configMap).enabled) | default false }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+data:
+  {{- if (.Values.configMap).mountPath }}
+  {{- range $key, $value := (.Values.configMap).files }}
+  {{ $key }}: |
+{{ $value | indent 4 }}
+  {{- end }}
+  {{- else }}
+  {{- range $key, $value := (.Values.configMap).data }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

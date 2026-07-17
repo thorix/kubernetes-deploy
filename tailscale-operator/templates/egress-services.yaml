@@ -1,0 +1,19 @@
+{{- range .Values.egressServices }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace }}
+  annotations:
+    tailscale.com/tailnet-fqdn: {{ .tailnetFQDN | quote }}
+spec:
+  type: ClusterIP
+  ports:
+    {{- range .ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      protocol: TCP
+      targetPort: {{ .targetPort }}
+    {{- end }}
+{{- end }}

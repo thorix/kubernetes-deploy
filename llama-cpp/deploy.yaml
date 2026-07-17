@@ -1,0 +1,7 @@
+# llama-cpp deployment
+
+namespace: llama
+
+helm:
+- valuesFiles:
+  - values.yaml

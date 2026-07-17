@@ -1,0 +1,206 @@
+# Plex Media Server - using simple-service chart
+# This replaces the custom chart with simple-service base
+
+workloadType: StatefulSet
+
+image:
+  repository: plexinc/pms-docker
+  tag: "1.43.0.10467-2b1ba6e69"
+  pullPolicy: IfNotPresent
+
+# Pod hostname for Plex server identification
+hostname: ryan-celluloid
+
+# Multiple ports for Plex services
+ports:
+- name: plex
+  containerPort: 32400
+  protocol: TCP
+- name: dlna
+  containerPort: 32469
+  protocol: TCP
+- name: gdm1
+  containerPort: 32410
+  protocol: UDP
+- name: gdm2
+  containerPort: 32412
+  protocol: UDP
+- name: gdm3
+  containerPort: 32413
+  protocol: UDP
+- name: gdm4
+  containerPort: 32414
+  protocol: UDP
+- name: companion
+  containerPort: 3005
+  protocol: TCP
+- name: roku
+  containerPort: 8324
+  protocol: TCP
+- name: bonjour
+  containerPort: 1900
+  protocol: UDP
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+# Environment variables
+env:
+- name: TZ
+  value: "UTC"
+
+# Secrets from Vault
+envFrom:
+- secretRef:
+    name: plex-simple-service-secrets
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 4Gi
+
+# Service configuration
+service:
+  type: NodePort
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: "plex"
+    tailscale.com/tags: "tag:k8s-plex"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Plex"
+    gethomepage.dev/description: "Media server"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "plex.png"
+    gethomepage.dev/href: "https://plex.lan"
+  ports:
+  - name: plex
+    port: 32400
+    targetPort: plex
+    nodePort: 32400
+    protocol: TCP
+  - name: dlna
+    port: 32469
+    targetPort: dlna
+    protocol: TCP
+  - name: gdm1
+    port: 32410
+    targetPort: gdm1
+    protocol: UDP
+  - name: gdm2
+    port: 32412
+    targetPort: gdm2
+    protocol: UDP
+  - name: gdm3
+    port: 32413
+    targetPort: gdm3
+    protocol: UDP
+  - name: gdm4
+    port: 32414
+    targetPort: gdm4
+    protocol: UDP
+  - name: companion
+    port: 3005
+    targetPort: companion
+    protocol: TCP
+  - name: roku
+    port: 8324
+    targetPort: roku
+    protocol: TCP
+  - name: bonjour
+    port: 1900
+    targetPort: bonjour
+    protocol: UDP
+
+# HTTPRoute
+httproute:
+  enabled: true
+  hostname: ""
+  gateway:
+    name: http-gateway
+    namespace: kube-system
+
+# ServiceAccount for Vault auth
+serviceAccount:
+  create: true
+
+# Disable default probes (Plex has its own health checks)
+probes:
+  enabled: false
+
+# Volume claim templates for StatefulSet
+volumeClaimTemplates:
+- name: config
+  mountPath: /config
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 50Gi
+
+# SMB persistent volumes for media
+persistentVolumes:
+- name: media
+  capacity: 10Ti
+  accessModes:
+    - ReadOnlyMany
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: true
+    volumeAttributes:
+      source: "//nas.lan/media"
+    nodeStageSecretRef:
+      name: plex-simple-service-smbcreds
+- name: over-the-air
+  capacity: 1Ti
+  accessModes:
+    - ReadWriteMany
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeAttributes:
+      source: "//nas.lan/media/overTheAir"
+    nodeStageSecretRef:
+      name: plex-simple-service-smbcreds
+
+# Additional volumes (transcode in memory)
+volumes:
+- name: transcode
+  emptyDir:
+    medium: Memory
+    sizeLimit: 4Gi
+
+# Volume mounts
+volumeMounts:
+- name: media
+  mountPath: /data/media
+  readOnly: true
+- name: over-the-air
+  mountPath: /data/overTheAir
+- name: transcode
+  mountPath: /transcode
+
+# Vault integration
+vault:
+  enabled: true
+  secrets:
+    secrets: "plex/claim"
+    # Real vault path embeds the NAS server name -> private overlay; placeholder here.
+    smbcreds: "smb/nas/plex"

@@ -1,0 +1,37 @@
+{{- if ne ((.Values.service).enabled | toString) "false" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+  {{- with (.Values.service).annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ (.Values.service).type | default "ClusterIP" }}
+  ports:
+    {{- if (.Values.service).ports }}
+    {{- range (.Values.service).ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort | default .name }}
+      protocol: {{ .protocol | default "TCP" }}
+      {{- if and .nodePort (eq ($.Values.service).type "NodePort") }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+    {{- end }}
+    {{- else }}
+    - port: {{ (.Values.service).port | default 80 }}
+      targetPort: {{ include "simple-service.targetPort" . }}
+      protocol: TCP
+      name: http
+      {{- if and ((.Values.service).nodePort) (eq ((.Values.service).type) "NodePort") }}
+      nodePort: {{ (.Values.service).nodePort }}
+      {{- end }}
+    {{- end }}
+  selector:
+    {{- include "simple-service.selectorLabels" . | nindent 4 }}
+{{- end }}

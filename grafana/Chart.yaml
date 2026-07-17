@@ -1,0 +1,11 @@
+apiVersion: v2
+name: grafana
+description: Grafana with provisioned dashboards
+type: application
+version: 0.1.0
+appVersion: "10.5.15"
+
+dependencies:
+  - name: grafana
+    version: "10.5.15"
+    repository: https://grafana.github.io/helm-charts

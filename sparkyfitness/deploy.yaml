@@ -1,0 +1,13 @@
+namespace: sparkyfitness
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../sparkyfitness/values.postgres.yaml
+- path: simple-service
+  valuesFiles:
+  - ../sparkyfitness/values.server.yaml
+- path: simple-service
+  valuesFiles:
+  - ../sparkyfitness/values.frontend.yaml
+# db-backup deferred until the NAS/SMB endpoint exists — see
+# docs/superpowers/specs/2026-06-21-sparkyfitness-deployment-design.md

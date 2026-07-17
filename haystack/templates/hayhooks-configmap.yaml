@@ -1,0 +1,207 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "haystack.fullname" . }}-pipelines
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "haystack.labels" . | nindent 4 }}
+data:
+  # Git Indexer Pipeline
+  git_indexer_pipeline_wrapper.py: |
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+    from typing import List, Optional
+
+    from haystack import Document, Pipeline
+    from haystack.components.preprocessors import DocumentSplitter
+    from haystack.components.writers import DocumentWriter
+    from haystack.document_stores.types import DuplicatePolicy
+    from haystack_integrations.components.embedders.ollama import OllamaDocumentEmbedder
+    from milvus_haystack import MilvusDocumentStore
+    from hayhooks import BasePipelineWrapper
+
+    class PipelineWrapper(BasePipelineWrapper):
+        def __init__(self):
+            self.milvus_host = os.getenv("MILVUS_HOST", "localhost")
+            self.milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+            self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            self.embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+            self.repos_dir = Path("/repos")
+
+        def setup(self) -> Pipeline:
+            document_store = MilvusDocumentStore(
+                connection_args={"uri": f"http://{self.milvus_host}:{self.milvus_port}"},
+                collection_name="git_documents",
+            )
+
+            pipeline = Pipeline()
+            pipeline.add_component("splitter", DocumentSplitter(
+                split_by="sentence",
+                split_length=5,
+                split_overlap=1
+            ))
+            pipeline.add_component("embedder", OllamaDocumentEmbedder(
+                model=self.embedding_model,
+                url=self.ollama_url
+            ))
+            pipeline.add_component("writer", DocumentWriter(
+                document_store=document_store,
+                policy=DuplicatePolicy.OVERWRITE
+            ))
+
+            pipeline.connect("splitter", "embedder")
+            pipeline.connect("embedder", "writer")
+
+            return pipeline
+
+        async def run_api_async(self, repo_url: str, branch: str = "main") -> str:
+            """Clone and index a git repository into the knowledge base.
+
+            Indexes code files (.py, .go, .rs, .ts, .js) and documentation (.md, .txt, .yaml)
+            for semantic search via the rag_query tool.
+
+            Args:
+                repo_url: Git repository URL (e.g., https://github.com/org/repo.git)
+                branch: Branch to index (default: main)
+
+            Returns:
+                JSON string with status and count of documents and chunks indexed
+            """
+            repo_name = repo_url.split("/")[-1].replace(".git", "")
+            repo_path = self.repos_dir / repo_name
+
+            if repo_path.exists():
+                subprocess.run(["git", "-C", str(repo_path), "fetch", "origin"], check=True)
+                subprocess.run(["git", "-C", str(repo_path), "reset", "--hard", f"origin/{branch}"], check=True)
+            else:
+                subprocess.run(["git", "clone", "--branch", branch, repo_url, str(repo_path)], check=True)
+
+            documents = []
+            extensions = [".md", ".txt", ".py", ".yaml", ".yml", ".json", ".go", ".rs", ".ts", ".js"]
+
+            for ext in extensions:
+                for file_path in repo_path.rglob(f"*{ext}"):
+                    if ".git" in str(file_path):
+                        continue
+                    try:
+                        content = file_path.read_text(encoding="utf-8", errors="ignore")
+                        rel_path = file_path.relative_to(repo_path)
+                        documents.append(Document(
+                            content=content,
+                            meta={
+                                "repo": repo_name,
+                                "file_path": str(rel_path),
+                                "repo_url": repo_url,
+                                "branch": branch
+                            }
+                        ))
+                    except Exception as e:
+                        print(f"Error reading {file_path}: {e}")
+
+            pipeline = self.setup()
+            result = pipeline.run({"splitter": {"documents": documents}})
+
+            return json.dumps({
+                "status": "success",
+                "repo": repo_name,
+                "documents_indexed": len(documents),
+                "chunks_written": result.get("writer", {}).get("documents_written", 0)
+            })
+
+  # RAG Query Pipeline
+  rag_query_pipeline_wrapper.py: |
+    import json
+    import os
+    from typing import List, Optional
+
+    from haystack import Pipeline
+    from haystack.components.builders import PromptBuilder
+    from haystack_integrations.components.embedders.ollama import OllamaTextEmbedder
+    from milvus_haystack import MilvusDocumentStore, MilvusEmbeddingRetriever
+    from hayhooks import BasePipelineWrapper
+
+    class PipelineWrapper(BasePipelineWrapper):
+        def __init__(self):
+            self.milvus_host = os.getenv("MILVUS_HOST", "localhost")
+            self.milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+            self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            self.embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+
+        def setup(self) -> Pipeline:
+            document_store = MilvusDocumentStore(
+                connection_args={"uri": f"http://{self.milvus_host}:{self.milvus_port}"},
+                collection_name="git_documents",
+            )
+
+            pipeline = Pipeline()
+
+            pipeline.add_component("embedder", OllamaTextEmbedder(
+                model=self.embedding_model,
+                url=self.ollama_url
+            ))
+
+            pipeline.add_component("retriever", MilvusEmbeddingRetriever(
+                document_store=document_store,
+                top_k=5
+            ))
+
+            # Jinja2 template - note the escaped braces for Helm compatibility
+            prompt_template = """
+            Based on the following context from the codebase, answer the question.
+
+            Context:
+            {{ "{% for doc in documents %}" }}
+            --- File: {{ "{{ doc.meta.file_path }}" }} ({{ "{{ doc.meta.repo }}" }}) ---
+            {{ "{{ doc.content }}" }}
+            {{ "{% endfor %}" }}
+
+            Question: {{ "{{ query }}" }}
+
+            Answer:
+            """
+            pipeline.add_component("prompt_builder", PromptBuilder(template=prompt_template))
+
+            pipeline.connect("embedder.embedding", "retriever.query_embedding")
+            pipeline.connect("retriever.documents", "prompt_builder.documents")
+
+            return pipeline
+
+        async def run_api_async(self, query: str, top_k: int = 5) -> str:
+            """Search the indexed git repositories for relevant code and documentation.
+
+            Use this tool to find information in the knowledge base. Returns matching
+            documents with file paths, repository names, and relevance scores.
+
+            Args:
+                query: Natural language question or search query
+                top_k: Number of results to return (default: 5)
+
+            Returns:
+                JSON string with documents matching the query
+            """
+            pipeline = self.setup()
+            pipeline.get_component("retriever").top_k = top_k
+
+            result = pipeline.run({
+                "embedder": {"text": query},
+                "prompt_builder": {"query": query}
+            })
+
+            documents = result.get("retriever", {}).get("documents", [])
+            prompt = result.get("prompt_builder", {}).get("prompt", "")
+
+            return json.dumps({
+                "query": query,
+                "prompt": prompt,
+                "documents": [
+                    {
+                        "content": doc.content[:500] + "..." if len(doc.content) > 500 else doc.content,
+                        "file_path": doc.meta.get("file_path"),
+                        "repo": doc.meta.get("repo"),
+                        "score": doc.score
+                    }
+                    for doc in documents
+                ]
+            })

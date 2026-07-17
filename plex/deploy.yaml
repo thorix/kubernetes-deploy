@@ -1,0 +1,9 @@
+# plex deployment
+# Uses simple-service chart for Plex Media Server
+
+namespace: plex
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../plex/values.yaml

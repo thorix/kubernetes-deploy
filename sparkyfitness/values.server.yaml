@@ -1,0 +1,202 @@
+# SparkyFitness — backend API server (Node)
+#
+# The server self-migrates the schema on startup using the Postgres superuser,
+# then creates and runs as a limited application user. An init container waits
+# for Postgres so the server doesn't crash-loop before the DB is reachable.
+
+workloadType: StatefulSet
+# nameOverride (not fullnameOverride) so the selector label is unique per
+# instance -> sparkyfitness-server. See values.postgres.yaml for why.
+nameOverride: server
+
+image:
+  repository: codewithcj/sparkyfitness_server
+  tag: "v0.17.0"
+
+containerPort: 3010
+
+# Server writes uploads/backups as uid/gid 1000; make volumes group-writable.
+podSecurityContext:
+  fsGroup: 1000
+
+initContainers:
+- name: wait-for-db
+  image: postgres:18-alpine
+  command:
+  - /bin/sh
+  - -c
+  - until pg_isready -h sparkyfitness-postgres -p 5432; do echo "waiting for postgres"; sleep 2; done
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+
+env:
+# --- Database connection (non-secret) ---
+- name: SPARKY_FITNESS_DB_HOST
+  value: "sparkyfitness-postgres.sparkyfitness.svc.cluster.local"
+- name: SPARKY_FITNESS_DB_PORT
+  value: "5432"
+- name: SPARKY_FITNESS_DB_NAME
+  value: "sparkyfitness_db"
+# --- DB superuser creds: single source of truth = the postgres secret ---
+- name: SPARKY_FITNESS_DB_USER
+  valueFrom:
+    secretKeyRef:
+      name: sparkyfitness-postgres-postgres
+      key: POSTGRES_USER
+- name: SPARKY_FITNESS_DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: sparkyfitness-postgres-postgres
+      key: POSTGRES_PASSWORD
+# --- App behaviour (non-secret) ---
+# Public HTTPS URL — required for CORS / Better-Auth. Placeholder; real in overlay.
+- name: SPARKY_FITNESS_FRONTEND_URL
+  value: "https://sparkyfitness.lan"
+- name: NODE_ENV
+  value: "production"
+- name: TZ
+  value: "Etc/UTC"
+- name: SPARKY_FITNESS_LOG_LEVEL
+  value: "INFO"
+- name: SPARKY_FITNESS_DISABLE_SIGNUP
+  value: "false"
+# Fail-safe so a future OIDC misconfig can't lock everyone out.
+- name: SPARKY_FITNESS_FORCE_EMAIL_LOGIN
+  value: "true"
+
+# App-user creds + encryption keys from Vault (synced secret below).
+# Keys: SPARKY_FITNESS_APP_DB_USER, SPARKY_FITNESS_APP_DB_PASSWORD,
+#       SPARKY_FITNESS_API_ENCRYPTION_KEY, BETTER_AUTH_SECRET
+envFrom:
+- secretRef:
+    name: sparkyfitness-server-secrets
+
+service:
+  port: 3010
+
+probes:
+  enabled: true
+  liveness:
+    path: /api/health
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 6
+  readiness:
+    path: /api/health
+    port: http
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    failureThreshold: 6
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+serviceAccount:
+  create: true
+
+# Persistent app data on Longhorn (uploads + backups), scratch on emptyDir.
+volumeClaimTemplates:
+- name: uploads
+  mountPath: /app/SparkyFitnessServer/uploads
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 2Gi
+- name: backup
+  mountPath: /app/SparkyFitnessServer/backup
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 2Gi
+
+volumes:
+- name: temp-uploads
+  emptyDir: {}
+- name: tmp
+  emptyDir: {}
+
+volumeMounts:
+- name: temp-uploads
+  mountPath: /app/SparkyFitnessServer/temp_uploads
+- name: tmp
+  mountPath: /tmp
+
+vault:
+  enabled: true
+  kubernetes:
+    role: sparkyfitness-server
+  secrets:
+    secrets: "sparkyfitness/server"
+
+# Network policy: default-deny egress for the health-data backend.
+# - ingress: only the frontend may reach :3010 (kubelet probes allowed by default)
+# - egress: Postgres + DNS + an explicit toFQDNs allowlist of food/exercise APIs
+# DNS is declared here as an L7 rule (rules.dns) rather than the chart's allowDNS:
+# Cilium's DNS proxy must observe the query to resolve the toFQDNs allowlist, so a
+# plain L4 :53 allow is insufficient.
+networkPolicy:
+  enabled: true
+  ingress:
+    customRules:
+    - fromEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: frontend
+          app.kubernetes.io/instance: sparkyfitness
+      toPorts:
+      - ports:
+        - port: "3010"
+          protocol: TCP
+  egress:
+    denyAll: true
+    allowDNS: false
+    customRules:
+    # L7 DNS to kube-dns — required for toFQDNs resolution
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: kube-system
+          k8s:k8s-app: kube-dns
+      toPorts:
+      - ports:
+        - port: "53"
+          protocol: UDP
+        - port: "53"
+          protocol: TCP
+        rules:
+          dns:
+          - matchPattern: "*"
+    # Postgres
+    - toEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/instance: sparkyfitness
+      toPorts:
+      - ports:
+        - port: "5432"
+          protocol: TCP
+    # External food/exercise providers usable without OAuth (default search).
+    # To enable another provider, add its matchName(s) here. Full provider->domain
+    # map (OAuth fitness trackers etc.) is in the design doc; e.g.:
+    #   strava www.strava.com | garmin connect.garmin.com |
+    #   fitbit api.fitbit.com,www.fitbit.com | withings wbsapi.withings.net,account.withings.com |
+    #   polar polarremote.com,www.polaraccesslink.com,flow.polar.com | hevy api.hevyapp.com |
+    #   googlehealth health.googleapis.com,oauth2.googleapis.com,accounts.google.com,www.googleapis.com |
+    #   fatsecret platform.fatsecret.com,oauth.fatsecret.com | nutritionix trackapi.nutritionix.com |
+    #   yazio yzapi.yazio.com | swissfood api.webapp.prod.blv.foodcase-services.com
+    - toFQDNs:
+      - matchName: world.openfoodfacts.org   # OpenFoodFacts (default food DB)
+      - matchName: api.nal.usda.gov          # USDA FoodData Central
+      - matchName: wger.de                   # wger exercise DB
+      - matchName: raw.githubusercontent.com # free-exercise-db (static dataset)
+      toPorts:
+      - ports:
+        - port: "443"
+          protocol: TCP

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: vault-config-operator
+description: Vault Config Operator for managing Vault configuration as Kubernetes CRDs
+type: application
+version: 0.1.0
+appVersion: "v0.8.38"
+
+dependencies:
+  - name: vault-config-operator
+    version: v0.8.49
+    repository: https://redhat-cop.github.io/vault-config-operator

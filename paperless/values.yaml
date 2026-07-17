@@ -1,0 +1,210 @@
+# Paperless-ngx — document management system
+
+workloadType: StatefulSet
+
+image:
+  repository: ghcr.io/paperless-ngx/paperless-ngx
+  tag: "2.20.14"
+
+ports:
+- name: http
+  containerPort: 8000
+  protocol: TCP
+
+podSecurityContext:
+  fsGroup: 1000
+
+env:
+- name: PAPERLESS_REDIS
+  value: "redis://paperless-redis.paperless.svc.cluster.local:6379"
+- name: PAPERLESS_URL
+  value: "https://paperless.lan"
+- name: PAPERLESS_TIME_ZONE
+  value: "UTC"
+- name: PAPERLESS_OCR_LANGUAGE
+  value: "eng"
+# Aggressive page auto-rotation. Default threshold (12) leaves many
+# sideways pages alone because orientation confidence is marginal.
+# Lowering to 6 rotates more aggressively based on Tesseract detection.
+- name: PAPERLESS_OCR_ROTATE_PAGES
+  value: "true"
+- name: PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD
+  value: "6"
+# Filter blank / bleed-through pages via vision model before consumption
+- name: PAPERLESS_PRE_CONSUME_SCRIPT
+  value: "/scripts/pre_consume.py"
+- name: PAPERLESS_CONSUMER_POLLING
+  value: "30"
+- name: PAPERLESS_CONSUMER_RECURSIVE
+  value: "true"
+- name: PAPERLESS_DBENGINE
+  value: "postgresql"
+- name: PAPERLESS_DBHOST
+  value: "paperless-postgres.paperless.svc.cluster.local"
+- name: PAPERLESS_DBNAME
+  value: "paperless"
+- name: PAPERLESS_DBUSER
+  valueFrom:
+    secretKeyRef:
+      name: paperless-postgres-postgres
+      key: POSTGRES_USER
+- name: PAPERLESS_DBPASS
+  valueFrom:
+    secretKeyRef:
+      name: paperless-postgres-postgres
+      key: POSTGRES_PASSWORD
+
+envFrom:
+- secretRef:
+    name: paperless-simple-service-secrets
+
+service:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+
+httproute:
+  enabled: true
+  hostname: paperless.lan
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Paperless"
+    gethomepage.dev/description: "Document management"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "paperless-ngx.png"
+
+probes:
+  enabled: true
+  liveness:
+    path: /
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: /
+    port: http
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 4Gi
+
+serviceAccount:
+  create: true
+
+# Longhorn volume for search index and app data (DB moved to postgres)
+volumeClaimTemplates:
+- name: data
+  mountPath: /usr/src/paperless/data
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 3Gi
+
+# SMB volume for document storage on NAS
+persistentVolumes:
+- name: media
+  capacity: 1Ti
+  accessModes:
+    - ReadWriteMany
+  mountOptions:
+    - dir_mode=0755
+    - file_mode=0644
+    - uid=1000
+    - gid=1000
+  csi:
+    driver: smb.csi.k8s.io
+    readOnly: false
+    volumeAttributes:
+      source: "//nas.lan/paperless"
+    nodeStageSecretRef:
+      name: paperless-simple-service-smbcreds
+
+volumeMounts:
+- name: media
+  mountPath: /usr/src/paperless/media
+  subPath: media
+- name: media
+  mountPath: /usr/src/paperless/consume
+  subPath: consume
+- name: media
+  mountPath: /usr/src/paperless/export
+  subPath: export
+
+# Vault integration
+vault:
+  enabled: true
+  secrets:
+    secrets: "paperless/config"
+    # Real vault path embeds NAS server name -> private overlay; placeholder here.
+    smbcreds: "smb/nas/paperless"
+
+# Network policy
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: true
+    customRules:
+    # Allow ingress from paperless-gpt and paperless-ai-next
+    - fromEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: paperless-gpt
+      - matchLabels:
+          app.kubernetes.io/name: paperless-ai-next
+      toPorts:
+      - ports:
+        - port: "8000"
+          protocol: TCP
+  egress:
+    denyAll: true
+    allowDNS: true
+    customRules:
+    # Allow egress to Redis
+    - toEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: redis
+      toPorts:
+      - ports:
+        - port: "6379"
+          protocol: TCP
+    # Allow egress to PostgreSQL
+    - toEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: postgres
+      toPorts:
+      - ports:
+        - port: "5432"
+          protocol: TCP
+    # Allow egress to paperless-ai-next for webhook-triggered scans
+    - toEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: paperless-ai-next
+      toPorts:
+      - ports:
+        - port: "3000"
+          protocol: TCP
+    # Allow egress to Ollama for pre-consume blank-page filter
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: ollama
+      toPorts:
+      - ports:
+        - port: "11434"
+          protocol: TCP
+    # Allow egress to SMB (NAS)
+    - toCIDR:
+      - 10.0.0.0/8
+      toPorts:
+      - ports:
+        - port: "445"
+          protocol: TCP

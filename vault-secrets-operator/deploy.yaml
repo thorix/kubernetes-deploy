@@ -1,0 +1,7 @@
+# vault-secrets-operator deployment
+
+namespace: vault-secrets-operator-system
+
+helm:
+- valuesFiles:
+  - values.yaml

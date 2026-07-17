@@ -1,0 +1,9 @@
+namespace: arc-systems
+syncWave: "-1"
+
+helm:
+- chart: gha-runner-scale-set-controller
+  repoURL: ghcr.io/actions/actions-runner-controller-charts
+  targetRevision: "0.14.0"
+  valuesFiles:
+  - arc-systems/values.yaml

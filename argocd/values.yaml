@@ -1,0 +1,106 @@
+# Cluster-level bootstrap Application (must sync before the ApplicationSet).
+# Points at the cluster-deploy repo which owns namespace PSA labels and other
+# cluster-shape config. Sync-wave -10 ensures this lands before app namespaces
+# are created so PSA labels exist when pods first schedule.
+clusterInfrastructure:
+  enabled: true
+  repoURL: https://github.com/YOUR_ORG/cluster-deploy.git
+  targetRevision: HEAD
+  path: cluster-infrastructure
+  project: default
+  # Prod values file - only set in values.prod.yaml for production ArgoCD.
+  prodValuesFile: ""
+
+# ApplicationSet configuration for bootstrapping applications
+applicationSet:
+  enabled: true
+  name: bootstrap-apps
+  namespace: argocd
+  generator:
+    repoURL: https://github.com/YOUR_ORG/kubernetes-deploy.git
+    revision: HEAD
+    # Dynamically discover all deploy.yaml files (including argocd for self-management)
+    configPath: "**/deploy.yaml"
+    defaultProject: "default"
+    # Prod values file - only set in values.prod.yaml for production ArgoCD
+    # Leave empty for test deployments
+    prodValuesFile: ""
+    # Private config repo for per-cluster env overlays. Empty on local/test
+    # so only generic base values apply. Set in values.prod.yaml per cluster.
+    configRepoURL: ""
+    clusterName: ""
+
+# Custom HTTPRoute pointing to port 443 (h2c) so both HTTP and gRPC work over HTTP/2
+httproute:
+  enabled: false
+
+# GRPCRoute for ArgoCD CLI access (gRPC requires HTTP/2, HTTPRoute only handles HTTP/1.1)
+grpcRoute:
+  enabled: false
+
+# ArgoCD subchart configuration
+argocd:
+  global:
+    domain: argocd.lan
+
+  # Configure the server to run in insecure mode for TLS termination at ingress
+  configs:
+    params:
+      server.insecure: true
+    # OCI Helm repositories
+    repositories:
+      ghcr-actions:
+        name: ghcr-actions
+        type: helm
+        url: ghcr.io/actions/actions-runner-controller-charts
+        enableOCI: "true"
+    # Additional accounts for API access
+    cm:
+      accounts.claude: apiKey
+      accounts.claude.enabled: "true"
+    # RBAC configuration for accounts
+    rbac:
+      policy.csv: |
+        p, claude, applications, get, */*, allow
+        p, claude, applications, sync, */*, allow
+
+  server:
+    # Enable insecure mode (no TLS)
+    insecure: true
+
+    # Ingress configuration
+    ingress:
+      enabled: false
+    # Disable subchart HTTPRoute - using custom template with h2c port instead
+    httproute:
+      enabled: false
+
+    extraArgs:
+      - --insecure
+
+    # Enable metrics for monitoring
+    metrics:
+      enabled: true
+
+  # Enable metrics for monitoring
+  controller:
+    metrics:
+      enabled: true
+
+  repoServer:
+    metrics:
+      enabled: true
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+
+  # Disable Dex OIDC
+  dex:
+    enabled: false
+
+  # Disable notifications
+  notifications:
+    enabled: false

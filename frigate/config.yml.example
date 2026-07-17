@@ -1,0 +1,74 @@
+# Frigate NVR Configuration — EXAMPLE / TEMPLATE
+# https://docs.frigate.video/configuration/
+#
+# This is a public, sanitized template. The live config is location-specific
+# (camera IPs, stream URLs, retention tuning) and is NOT shipped in this repo.
+#
+# How it's wired:
+#   frigate/deploy.yaml injects config.yml via a Helm fileParameter whose path
+#   is "$config/<cluster>/frigate/config.yml" — i.e. it's resolved from the
+#   private config repo (the ApplicationSet adds it as the "$config" ref source).
+#
+# To run your own:
+#   1. Copy this file to <your-config-repo>/<cluster>/frigate/config.yml
+#   2. Fill in your cameras, streams, and retention.
+#   3. Point frigate/deploy.yaml's fileParameter path at your cluster, e.g.
+#        path: $config/<cluster>/frigate/config.yml
+#   4. Provide credentials via the Vault-synced secrets referenced in values.yaml
+#      (FRIGATE_RTSP_USER / FRIGATE_RTSP_PASSWORD, FRIGATE_DOORBELL_* etc.).
+
+mqtt:
+  enabled: false
+
+detectors:
+  cpu:
+    type: cpu
+    num_threads: 4
+
+ffmpeg:
+  hwaccel_args: []
+
+record:
+  enabled: true
+  retain:
+    # Baseline retention for ALL motion footage. Tune per-cluster to your
+    # NVR storage. (e.g. 3 for a few days, 60 for ~2 months.)
+    days: 7
+    mode: motion
+  alerts:
+    retain:
+      days: 14
+      mode: active_objects
+  detections:
+    retain:
+      days: 14
+      mode: active_objects
+
+snapshots:
+  enabled: true
+  retain:
+    default: 14
+
+# Optional restreaming layer (e.g. for doorbells exposing non-RTSP feeds).
+go2rtc:
+  streams:
+    example_doorbell:
+      - "ffmpeg:http://CAMERA_IP/flv?port=1935&app=bcs&stream=channel0_main.bcs&user={FRIGATE_DOORBELL_USER}&password={FRIGATE_DOORBELL_PASSWORD}#video=copy#audio=copy#audio=opus"
+
+cameras:
+  example_camera:
+    enabled: true
+    ffmpeg:
+      inputs:
+        # High-res stream for recording
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=0
+          roles:
+            - record
+        # Low-res substream for detection
+        - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=1
+          roles:
+            - detect
+    detect:
+      width: 1280
+      height: 720
+      fps: 5

@@ -1,0 +1,9 @@
+# tailscale-dns deployment
+# Dedicated CoreDNS for Tailscale split DNS - resolves *.example.lan to https-gateway ClusterIP
+
+namespace: tailscale-dns
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../tailscale-dns/values.yaml

@@ -1,0 +1,7 @@
+# comfyui deployment
+
+namespace: comfyui
+
+helm:
+- valuesFiles:
+  - values.yaml

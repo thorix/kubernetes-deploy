@@ -1,0 +1,47 @@
+{{- if .Values.httproute.enabled }}
+# Web UI route - HTTP/1.1 upstream for regular browser traffic
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server
+  labels:
+    {{- include "argocd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  {{- with (.Values.httproute).annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httproute.parentRefs | nindent 4 }}
+  hostnames:
+    {{- toYaml .Values.httproute.hostnames | nindent 4 }}
+  rules:
+    - backendRefs:
+        - kind: Service
+          name: argocd-server
+          port: 80
+---
+# gRPC-web route - h2c upstream so Envoy can forward converted gRPC
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server-grpc
+  labels:
+    {{- include "argocd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  parentRefs:
+    {{- toYaml .Values.httproute.parentRefs | nindent 4 }}
+  hostnames:
+    {{- toYaml .Values.httproute.hostnames | nindent 4 }}
+  rules:
+    - matches:
+        - headers:
+            - name: content-type
+              value: application/grpc-web+proto
+      backendRefs:
+        - kind: Service
+          name: argocd-server
+          port: 443
+{{- end }}

@@ -1,0 +1,7 @@
+# longhorn deployment
+
+namespace: longhorn-system
+
+helm:
+- valuesFiles:
+  - values.yaml

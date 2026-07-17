@@ -1,0 +1,20 @@
+namespace: paperless
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../paperless/values.yaml
+  - ../paperless/values.pre-consume.yaml
+- path: simple-service
+  valuesFiles:
+  - ../paperless/values.redis.yaml
+- path: simple-service
+  valuesFiles:
+  - ../paperless/values.postgres.yaml
+- path: simple-service
+  valuesFiles:
+  - ../paperless/values.paperless-gpt.yaml
+  - ../paperless/values.paperless-gpt.prompts.yaml
+- path: simple-service
+  valuesFiles:
+  - ../paperless/values.paperless-ai-next.yaml
+- path: paperless/db-backup

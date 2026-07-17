@@ -1,0 +1,48 @@
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Vault connection settings
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+
+  # How vault-config-operator authenticates to Vault
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+
+  # Policy name in Vault
+  name: {{ .Release.Name }}
+
+  # HCL policy definition
+  policy: |
+    # Allow reading Anthropic API key
+    path "kv/data/{{ .Values.vault.secrets.anthropic }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow reading MongoDB credentials
+    path "kv/data/{{ .Values.vault.secrets.mongodb }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow reading JWT secrets
+    path "kv/data/{{ .Values.vault.secrets.jwt }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow reading credential encryption keys
+    path "kv/data/{{ .Values.vault.secrets.creds }}" {
+      capabilities = ["read"]
+    }
+
+    # Allow listing secrets (for metadata)
+    path "kv/metadata/librechat/*" {
+      capabilities = ["read", "list"]
+    }

@@ -1,0 +1,308 @@
+# MCP Gateway Configuration
+# Wraps mcp-stack chart with cluster-specific settings
+
+mcp-stack:
+  global:
+    nameOverride: "mcp-gateway"
+
+  serviceAccount:
+    create: true
+    name: "mcp-gateway"
+
+  # Disable migration job — gateway >= v1.0.0-RC-3 runs alembic in-process
+  # at startup, so the chart's separate Job is redundant (and previously
+  # conflicted with ArgoCD PreSync hooks).
+  migration:
+    enabled: false
+
+  mcpContextForge:
+    replicaCount: 1
+
+    hpa:
+      enabled: false  # Start with fixed replicas
+
+    image:
+      repository: ghcr.io/ibm/mcp-context-forge
+      # Bumped from 1.0.0-BETA-2 to pick up tool-import / schema-validation
+      # fixes (PR #2342, etc.) — BETA-2 silently dropped 11 of grafana-mcp's
+      # 50 tools (including update_dashboard) during federation. See issue
+      # https://github.com/IBM/mcp-context-forge/issues/4304.
+      tag: "v1.0.0-RC-3"
+      pullPolicy: IfNotPresent
+
+    # The image requires an x86-64-v3 CPU, so this is pinned to a specific node.
+    # That node name is environment-specific -> private overlay; omitted from base.
+
+    service:
+      type: ClusterIP
+      port: 80
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "MCP Gateway"
+        gethomepage.dev/description: "Model Context Protocol Gateway"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "mdi-api"
+        gethomepage.dev/href: "https://mcp.lan"
+
+    containerPort: 4444
+
+    metrics:
+      enabled: false
+      serviceMonitor:
+        enabled: false
+
+    resources:
+      limits:
+        memory: 2Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+    ingress:
+      enabled: false  # Use HTTPRoute instead
+
+    # Environment configuration
+    env:
+      host: "0.0.0.0"
+      postgres:
+        port: 5432
+        db: mcpgateway
+        userKey: POSTGRES_USER
+        passwordKey: POSTGRES_PASSWORD
+      redis:
+        host: ""  # Auto-generated
+        port: 6379
+
+    config:
+      HTTP_SERVER: "gunicorn"
+      GUNICORN_WORKERS: "2"
+      GUNICORN_TIMEOUT: "600"
+      APP_NAME: "MCP Gateway"
+      HOST: "0.0.0.0"
+      PORT: "4444"
+      DB_POOL_SIZE: "10"
+      DB_MAX_OVERFLOW: "20"
+      # Logging
+      LOG_LEVEL: "INFO"
+      LOG_FORMAT: "json"
+      # UI
+      MCPGATEWAY_UI_ENABLED: "true"
+      MCPGATEWAY_ADMIN_API_ENABLED: "true"
+      # Environment - use development for HTTP access (disables secure cookie enforcement)
+      ENVIRONMENT: "development"
+      # Disable secure cookies for HTTP access (set to true if using HTTPS)
+      SECURE_COOKIES: "false"
+      # App domain for cookie/session handling
+      APP_DOMAIN: "http://mcp.rye"
+      # CORS allowed origins
+      ALLOWED_ORIGINS: '["http://mcp.rye","http://localhost","http://localhost:4444"]'
+      # Disable HSTS for HTTP access (enable if using HTTPS)
+      HSTS_ENABLED: "false"
+      # Allow RFC1918 private networks — gateway federates internal cluster
+      # MCP servers (haystack, argocd, opnsense, grafana). Without this,
+      # RC-3's SSRF protection blocks every *.svc.cluster.local URL.
+      SSRF_ALLOW_PRIVATE_NETWORKS: "true"
+
+    # Secrets — managed by Vault via VSO in production.
+    # These dev defaults are safe placeholders for local k3s testing only.
+    # Real credentials live in Vault at kv/mcp-gateway/gateway-secrets
+    secret:  # VSO creates mcp-gateway-gateway-secret from Vault
+
+    # Probe overrides — RC-3's gunicorn preload + 4 workers takes longer to
+    # bind /health than BETA-2 did. Without a real HTTP startup probe the
+    # liveness probe (initialDelay=10s, fail at ~55s) SIGKILLs the pod
+    # before it finishes loading.
+    probes:
+      startup:
+        type: http
+        path: /health
+        port: 4444
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 30   # up to 5 minutes for the app to come up
+      readiness:
+        type: http
+        path: /ready
+        port: 4444
+        initialDelaySeconds: 0
+        periodSeconds: 10
+        timeoutSeconds: 3
+        successThreshold: 1
+        failureThreshold: 3
+      liveness:
+        type: http
+        path: /health
+        port: 4444
+        initialDelaySeconds: 0
+        periodSeconds: 30
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+
+  # Disable fast-time-server ingress (use HTTPRoute)
+  mcpFastTimeServer:
+    enabled: true
+    ingress:
+      enabled: false
+
+  # PostgreSQL configuration
+  postgres:
+    enabled: true
+    image:
+      repository: postgres
+      tag: "16-alpine"
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: longhorn
+    resources:
+      limits:
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    existingSecret: mcp-gateway-database
+    credentials:
+      user: mcpgateway
+      password: changeme-dev
+      database: mcpgateway
+
+  # Redis configuration
+  redis:
+    enabled: true
+    image:
+      repository: redis
+      tag: "8-alpine"
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClassName: longhorn
+    resources:
+      limits:
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+  # Disable optional components
+  pgadmin:
+    enabled: false
+  redisCommander:
+    enabled: false
+  minio:
+    enabled: false
+
+# Vault integration
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 30m
+  secrets:
+    gateway-secrets: mcp-gateway/gateway-secrets
+    database: mcp-gateway/database
+  kubernetes:
+    mountPath: kubernetes
+    role: mcp-gateway
+    serviceAccount: mcp-gateway
+    audience: vault
+    tokenTTL: 86400
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system
+
+# MCP Server registrations (configure after deployment)
+# These will be registered via the Admin API as gateways
+mcpServers:
+  - name: haystack
+    url: "http://haystack-hayhooks.haystack.svc.cluster.local:1417/sse"
+    description: "Knowledge base RAG pipelines"
+  - name: argocd
+    url: "http://argocd-mcp-simple-service.argocd-mcp.svc.cluster.local:3000/mcp"
+    transport: "STREAMABLEHTTP"
+    description: "ArgoCD application management"
+  - name: grafana
+    url: "http://grafana-mcp-simple-service.grafana-mcp.svc.cluster.local:3000/mcp"
+    transport: "STREAMABLEHTTP"
+    description: "Grafana observability - dashboards, Prometheus/Loki queries, alerts"
+  - name: opnsense
+    url: "http://opnsense-mcp-simple-service.opnsense-mcp.svc.cluster.local:3000/mcp"
+    transport: "STREAMABLEHTTP"
+    description: "OPNsense firewall read-only diagnostics"
+    # Keep only: core_manage, diagnostics_manage, interfaces_manage, firewall_manage, unbound_manage, dhcpv4_manage
+    disabledTools:
+      - auth_manage
+      - captiveportal_manage
+      - cron_manage
+      - dhcpv6_manage
+      - dhcrelay_manage
+      - dnsmasq_manage
+      - firmware_manage
+      - ids_manage
+      - ipsec_manage
+      - kea_manage
+      - monit_manage
+      - openvpn_manage
+      - routes_manage
+      - routing_manage
+      - syslog_manage
+      - trafficshaper_manage
+      - trust_manage
+      - wireguard_manage
+
+# Virtual servers aggregate tools from gateways into a single MCP endpoint
+# Claude Code connects to the "ops" virtual server for a curated tool set
+virtualServers:
+  - name: ops
+    description: "Curated tools for debugging and operations"
+    # Select specific tools by their full gateway-prefixed name
+    tools:
+      - argocd-list-applications
+      - argocd-get-application
+      - argocd-sync-application
+      - argocd-get-application-events
+      - argocd-get-application-resource-tree
+      - argocd-get-application-workload-logs
+      # mcp-grafana v0.12.0 uses dashes, not underscores, in tool names.
+      # update_dashboard / write tools require gateway >= v1.0.0-RC-3, which
+      # has the schema validator that no longer drops free-form-object tools.
+      # Convention: agents must create new dashboards in the "MCP Sandbox"
+      # folder (search_folders → create_folder if missing, then update_dashboard
+      # with that folderUid). See docs/dashboard-creation guidance.
+      - grafana-search-dashboards
+      - grafana-get-dashboard-by-uid
+      - grafana-get-dashboard-summary
+      - grafana-get-dashboard-property
+      - grafana-get-dashboard-panel-queries
+      - grafana-update-dashboard
+      - grafana-search-folders
+      - grafana-create-folder
+      - grafana-list-datasources
+      - grafana-get-datasource
+      - grafana-list-prometheus-metric-names
+      - grafana-list-prometheus-metric-metadata
+      - grafana-list-prometheus-label-names
+      - grafana-list-prometheus-label-values
+      - grafana-query-prometheus-histogram
+      - grafana-query-loki-logs
+      - grafana-query-loki-stats
+      - grafana-list-loki-label-names
+      - grafana-list-loki-label-values
+      - grafana-list-alert-groups
+      - grafana-get-alert-group
+      - grafana-find-error-pattern-logs
+      - grafana-find-slow-requests
+      - grafana-get-panel-image
+      - haystack-deploy-pipeline
+      - haystack-undeploy-pipeline
+      - haystack-get-pipeline-status
+      - haystack-get-all-pipeline-statuses
+    visibility: public

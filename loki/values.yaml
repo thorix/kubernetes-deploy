@@ -1,0 +1,61 @@
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    path_prefix: /var/loki
+    replication_factor: 1
+  schemaConfig:
+    configs:
+    - from: "2024-04-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+  storage:
+    type: filesystem
+  limits_config:
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    volume_enabled: true
+    retention_period: 30d
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: longhorn
+
+# Disable components not needed in SingleBinary mode
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Disable caches for single-binary filesystem mode
+resultsCache:
+  enabled: false
+chunksCache:
+  enabled: false
+
+# Disable gateway - not needed for single-binary
+gateway:
+  enabled: false
+
+# Disable minio - using filesystem storage
+minio:
+  enabled: false

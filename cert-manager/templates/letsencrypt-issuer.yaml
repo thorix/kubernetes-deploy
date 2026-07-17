@@ -1,0 +1,32 @@
+{{- if .Values.letsEncrypt.enabled }}
+---
+# Let's Encrypt ClusterIssuer with DNS-01 challenge via Cloudflare
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.letsEncrypt.clusterIssuerName }}
+  labels:
+    {{- include "cert-manager-wrapper.labels" . | nindent 4 }}
+spec:
+  acme:
+    # Use Let's Encrypt production or staging server
+    server: {{ .Values.letsEncrypt.server }}
+    email: {{ .Values.letsEncrypt.email }}
+    # Secret to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            email: {{ .Values.letsEncrypt.cloudflare.email }}
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: {{ .Values.letsEncrypt.cloudflare.apiTokenKey }}
+        {{- if .Values.letsEncrypt.cloudflare.dnsZones }}
+        selector:
+          dnsZones:
+            {{- range .Values.letsEncrypt.cloudflare.dnsZones }}
+            - {{ . | quote }}
+            {{- end }}
+        {{- end }}
+{{- end }}

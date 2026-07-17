@@ -1,0 +1,18 @@
+{{- if .Values.vault.enabled }}
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: {{ include "haystack.fullname" . }}-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "haystack.labels" . | nindent 4 }}
+spec:
+  vaultConnectionRef: vault-connection
+  method: kubernetes
+  mount: {{ .Values.vault.kubernetes.mountPath }}
+  kubernetes:
+    role: {{ .Values.vault.kubernetes.role }}
+    serviceAccount: {{ .Values.vault.kubernetes.serviceAccount }}
+    audiences:
+      - {{ .Values.vault.kubernetes.audience }}
+{{- end }}

@@ -1,0 +1,50 @@
+# Immich Public Proxy - secure public sharing for Immich photos
+# Uses simple-service chart
+
+nameOverride: immich-public-proxy
+fullnameOverride: immich-public-proxy
+
+image:
+  repository: alangrainger/immich-public-proxy
+  tag: "1.15.6"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+containerPort: 3000
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+# Health checks
+probes:
+  enabled: true
+  liveness:
+    path: /
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 4Gi
+
+env:
+- name: IMMICH_URL
+  value: "http://immich-server.immich.svc.cluster.local"
+- name: PUBLIC_BASE_URL
+  value: "https://ps847291.lan"

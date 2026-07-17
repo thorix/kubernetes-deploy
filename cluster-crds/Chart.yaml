@@ -1,0 +1,8 @@
+apiVersion: v2
+name: cluster-crds
+description: Centralized CRD management for cluster operators
+type: application
+version: 0.1.0
+
+# This chart manages CRDs for operators that don't include them in Helm charts
+# Deploy this BEFORE the operators that depend on these CRDs

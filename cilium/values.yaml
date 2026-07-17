@@ -1,0 +1,71 @@
+# Cilium CNI configuration
+
+# Explicit MTU to avoid auto-detection picking up tailscale0's 1280
+# Cilium subtracts VXLAN overhead (~50 bytes) automatically, so set to physical NIC MTU
+MTU: 1500
+
+# IPAM
+ipam:
+  mode: kubernetes
+
+# Replace kube-proxy entirely
+kubeProxyReplacement: true
+
+# Use BPF masquerading instead of iptables
+# Fixes TTL exceeded drops at bpf_host.c:865 for external return traffic
+bpf:
+  masquerade: true
+
+# Security context capabilities
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# cgroup settings
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# API server access
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Gateway API
+gatewayAPI:
+  enabled: true
+  enableAlpn: true
+  enableAppProtocol: true
+  gatewayClass:
+    create: "true"
+
+# L2 announcements
+l2announcements:
+  enabled: true
+  leaseDuration: 3s
+  leaseRenewDeadline: 1s
+  leaseRetryPeriod: 500ms
+
+# External IPs
+externalIPs:
+  enabled: true
+
+# Hubble observability
+hubble:
+  relay:
+    enabled: true

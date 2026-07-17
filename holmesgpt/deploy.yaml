@@ -1,0 +1,12 @@
+# HolmesGPT - AI-powered Kubernetes root cause analysis
+# CNCF Sandbox project: https://github.com/HolmesGPT/holmesgpt
+
+namespace: holmesgpt
+
+helm:
+- chart: holmes
+  repoURL: https://robusta-charts.storage.googleapis.com
+  targetRevision: "0.31.1"
+  valuesFiles:
+  - holmesgpt/values.yaml
+- path: holmesgpt/health-checks

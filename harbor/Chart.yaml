@@ -1,0 +1,11 @@
+apiVersion: v2
+name: harbor
+description: Harbor container registry with vulnerability scanning
+type: application
+version: 0.1.0
+appVersion: "2.14.2"
+
+dependencies:
+  - name: harbor
+    version: 1.18.3
+    repository: https://helm.goharbor.io

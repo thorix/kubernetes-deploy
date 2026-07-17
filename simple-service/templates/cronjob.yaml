@@ -1,0 +1,128 @@
+{{- if eq (.Values.workloadType | default "Deployment") "CronJob" }}
+{{- $configMapEnabled := ((.Values.configMap).enabled) | default false -}}
+{{- $configMapMountPath := ((.Values.configMap).mountPath) | default "" -}}
+{{- $serviceAccountCreate := ((.Values.serviceAccount).create) | default false -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  {{- with .Values.cronjob.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy | default "Forbid" }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cronjob.backoffLimit | default 2 }}
+      template:
+        metadata:
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "simple-service.selectorLabels" . | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: {{ .Values.cronjob.restartPolicy | default "OnFailure" }}
+          {{- if $serviceAccountCreate }}
+          serviceAccountName: {{ include "simple-service.serviceAccountName" . }}
+          {{- end }}
+          automountServiceAccountToken: {{ ((.Values.serviceAccount).automountServiceAccountToken) | default false }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.initContainers }}
+          initContainers:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: {{ include "simple-service.name" . }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+              {{- with .Values.command }}
+              command:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.args }}
+              args:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.env }}
+              env:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- if or .Values.envFrom (and $configMapEnabled (not $configMapMountPath)) }}
+              envFrom:
+                {{- if and $configMapEnabled (not $configMapMountPath) }}
+                - configMapRef:
+                    name: {{ include "simple-service.fullname" . }}
+                {{- end }}
+                {{- with .Values.envFrom }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- end }}
+              {{- if or .Values.volumeMounts (and $configMapEnabled $configMapMountPath) ((.Values.persistence).enabled) }}
+              volumeMounts:
+                {{- if and $configMapEnabled $configMapMountPath }}
+                - name: config
+                  mountPath: {{ $configMapMountPath }}
+                  readOnly: true
+                {{- end }}
+                {{- if ((.Values.persistence).enabled) }}
+                - name: data
+                  mountPath: {{ .Values.persistence.mountPath | default "/data" }}
+                {{- end }}
+                {{- with .Values.volumeMounts }}
+                {{- tpl (toYaml .) $ | nindent 16 }}
+                {{- end }}
+              {{- end }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+          {{- if or .Values.volumes (and $configMapEnabled $configMapMountPath) .Values.persistentVolumes ((.Values.persistence).enabled) }}
+          volumes:
+            {{- if and $configMapEnabled $configMapMountPath }}
+            - name: config
+              configMap:
+                name: {{ include "simple-service.fullname" . }}
+            {{- end }}
+            {{- if ((.Values.persistence).enabled) }}
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "simple-service.fullname" . }}-data
+            {{- end }}
+            {{- range .Values.persistentVolumes }}
+            - name: {{ .name }}
+              persistentVolumeClaim:
+                claimName: {{ include "simple-service.fullname" $ }}-{{ .name }}
+            {{- end }}
+            {{- with .Values.volumes }}
+            {{- tpl (toYaml .) $ | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

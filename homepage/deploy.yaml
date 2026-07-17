@@ -1,0 +1,7 @@
+# homepage deployment
+
+namespace: homepage
+
+helm:
+- valuesFiles:
+  - values.yaml

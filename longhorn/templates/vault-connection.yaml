@@ -1,0 +1,12 @@
+{{- if .Values.vault.enabled }}
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: {{ include "longhorn.fullname" . }}-connection
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "longhorn.labels" . | nindent 4 }}
+spec:
+  address: {{ .Values.vault.address }}
+  skipTLSVerify: {{ .Values.vault.skipTLSVerify }}
+{{- end }}

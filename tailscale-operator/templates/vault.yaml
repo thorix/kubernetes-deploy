@@ -1,0 +1,101 @@
+---
+# Vault policy: allow tailscale operator SA to read the operator-oauth secret
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  authentication:
+    path: kubernetes
+    role: vault-config-operator
+  connection:
+    address: http://vault.vault.svc.cluster.local:8200
+    tLSConfig:
+      skipVerify: true
+  name: tailscale-operator
+  policy: |
+    path "kv/data/tailscale/operator-oauth" {
+      capabilities = ["read"]
+    }
+    path "kv/metadata/tailscale/operator-oauth" {
+      capabilities = ["read", "list"]
+    }
+---
+# Vault kubernetes auth role: bind the tailscale operator SA to the policy
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: KubernetesAuthEngineRole
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  authentication:
+    path: kubernetes
+    role: vault-config-operator
+  connection:
+    address: http://vault.vault.svc.cluster.local:8200
+    tLSConfig:
+      skipVerify: true
+  name: tailscale-operator
+  path: kubernetes
+  policies:
+    - tailscale-operator
+  targetNamespaces:
+    targetNamespaces:
+      - tailscale
+  targetServiceAccounts:
+    - operator
+  tokenTTL: 86400
+  audience: vault
+---
+# VSO VaultConnection
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  address: http://vault.vault.svc.cluster.local:8200
+  skipTLSVerify: true
+---
+# VSO VaultAuth
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  method: kubernetes
+  mount: kubernetes
+  vaultConnectionRef: tailscale-operator
+  kubernetes:
+    role: tailscale-operator
+    serviceAccount: operator
+    audiences:
+      - vault
+---
+# VSO VaultStaticSecret: syncs kv/tailscale/operator-oauth → secret/operator-oauth
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: tailscale-operator-oauth
+  namespace: tailscale
+  labels:
+    {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
+spec:
+  mount: kv
+  path: tailscale/operator-oauth
+  type: kv-v2
+  refreshAfter: 1h
+  vaultAuthRef: tailscale-operator
+  destination:
+    create: true
+    name: operator-oauth

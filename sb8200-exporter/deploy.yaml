@@ -1,0 +1,5 @@
+namespace: sb8200-exporter
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../sb8200-exporter/values.yaml

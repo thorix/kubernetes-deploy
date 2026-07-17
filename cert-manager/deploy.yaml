@@ -1,0 +1,7 @@
+# cert-manager deployment
+
+namespace: cert-manager
+
+helm:
+- valuesFiles:
+  - values.yaml

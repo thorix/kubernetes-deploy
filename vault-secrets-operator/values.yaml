@@ -1,0 +1,14 @@
+# Base values for Vault Secrets Operator
+# Vault Secrets Operator synchronizes secrets from Vault into Kubernetes
+
+# Values for the vault-secrets-operator subchart
+vault-secrets-operator:
+  # Controller configuration
+  controller:
+    manager:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi

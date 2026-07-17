@@ -1,0 +1,11 @@
+apiVersion: v2
+name: vault-secrets-operator
+description: Vault Secrets Operator for syncing secrets from Vault to Kubernetes
+type: application
+version: 0.1.0
+appVersion: "0.9.0"
+
+dependencies:
+  - name: vault-secrets-operator
+    version: 1.4.0
+    repository: https://helm.releases.hashicorp.com

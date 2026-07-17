@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+data:
+  librechat.yaml: |
+    version: 1.1.4
+    cache: true
+
+    # Endpoints configuration
+    endpoints:
+      # Anthropic Claude - models controlled via ANTHROPIC_MODELS env var
+      anthropic:
+        {{- if .Values.endpoints.anthropic.enabled }}
+        titleConvo: true
+        titleMethod: "completion"
+        titleModel: "claude-3-5-haiku-20241022"
+        modelDisplayLabel: "Claude"
+        {{- else }}
+        disabled: true
+        {{- end }}
+
+      # Custom endpoints for llama.cpp and other local models
+      custom:
+        {{- if .Values.endpoints.llamacpp.enabled }}
+        - name: "llama.cpp"
+          apiKey: "not-needed"
+          baseURL: "{{ .Values.endpoints.llamacpp.baseURL }}"
+          models:
+            default:
+              {{- range .Values.endpoints.llamacpp.models }}
+              - "{{ . }}"
+              {{- end }}
+            fetch: false
+          titleConvo: true
+          titleModel: "{{ index .Values.endpoints.llamacpp.models 0 }}"
+          modelDisplayLabel: "llama.cpp"
+          dropParams:
+            - "user"
+        {{- end }}
+        {{- if .Values.endpoints.ollama.enabled }}
+        - name: "Ollama"
+          apiKey: "not-needed"
+          baseURL: "{{ .Values.endpoints.ollama.baseURL }}/v1"
+          models:
+            default:
+              - "{{ .Values.endpoints.ollama.defaultModel }}"
+            fetch: true
+          titleConvo: true
+          titleModel: "{{ .Values.endpoints.ollama.defaultModel }}"
+          modelDisplayLabel: "Ollama"
+        {{- end }}
+
+    # File upload configuration
+    fileConfig:
+      endpoints:
+        anthropic:
+          fileLimit: 5
+          fileSizeLimit: 30
+        custom:
+          fileLimit: 5
+          fileSizeLimit: 30
+
+    # Rate limiting
+    rateLimits:
+      fileUploads:
+        ipMax: 100
+        ipWindowInMinutes: 60
+        userMax: 50
+        userWindowInMinutes: 60
+      conversationsImport:
+        ipMax: 100
+        ipWindowInMinutes: 60
+        userMax: 50
+        userWindowInMinutes: 60
+
+    # Registration configuration
+    registration:
+      socialLogins: []
+      {{- if .Values.registration.allowedDomains }}
+      allowedDomains:
+        {{- range .Values.registration.allowedDomains }}
+        - "{{ . }}"
+        {{- end }}
+      {{- end }}

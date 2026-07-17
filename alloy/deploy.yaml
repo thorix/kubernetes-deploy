@@ -1,0 +1,8 @@
+namespace: victoriametrics
+
+helm:
+- chart: alloy
+  repoURL: https://grafana.github.io/helm-charts
+  targetRevision: "1.8.2"
+  valuesFiles:
+  - alloy/values.yaml

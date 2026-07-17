@@ -1,0 +1,27 @@
+apiVersion: v2
+name: simple-service
+description: A reusable Helm chart for simple Kubernetes services
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+# This chart is designed to be used as a dependency by other charts.
+# It provides common patterns for:
+# - Deployment with configurable containers
+# - Service (ClusterIP)
+# - HTTPRoute (Gateway API)
+# - ServiceAccount
+# - ConfigMap for environment/configuration
+
+keywords:
+  - kubernetes
+  - helm
+  - base-chart
+  - library
+
+home: https://github.com/YOUR_ORG/kubernetes-deploy
+sources:
+  - https://github.com/YOUR_ORG/kubernetes-deploy
+
+maintainers:
+  - name: YOUR_ORG

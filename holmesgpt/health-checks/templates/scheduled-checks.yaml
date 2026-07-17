@@ -1,0 +1,69 @@
+# OOM detection - runs every 15 minutes
+# Checks for OOMKilled containers and analyzes memory usage patterns
+apiVersion: holmesgpt.dev/v1alpha1
+kind: ScheduledHealthCheck
+metadata:
+  name: oom-detection
+  namespace: holmesgpt
+spec:
+  schedule: "*/15 * * * *"
+  enabled: true
+  query: >-
+    Check if any containers have been OOMKilled in the last 30 minutes.
+    If so, analyze their memory usage trends from Prometheus, check the current
+    resource limits, and recommend appropriate memory request and limit values.
+    Focus on the immich namespace but check all namespaces.
+  timeout: 120
+  mode: monitor
+---
+# Pod health check - runs every 10 minutes
+# Checks for CrashLoopBackOff, pending pods, and restart storms
+apiVersion: holmesgpt.dev/v1alpha1
+kind: ScheduledHealthCheck
+metadata:
+  name: pod-health
+  namespace: holmesgpt
+spec:
+  schedule: "*/10 * * * *"
+  enabled: true
+  query: >-
+    Check for pods in CrashLoopBackOff, pods stuck in Pending state,
+    or pods with high restart counts across all namespaces.
+    If any issues are found, investigate the root cause using logs and events.
+  timeout: 90
+  mode: monitor
+---
+# Storage pressure check - runs every hour
+# Monitors PVC usage and Longhorn volume health
+apiVersion: holmesgpt.dev/v1alpha1
+kind: ScheduledHealthCheck
+metadata:
+  name: storage-health
+  namespace: holmesgpt
+spec:
+  schedule: "0 * * * *"
+  enabled: true
+  query: >-
+    Check PVC usage across all namespaces using Prometheus metrics.
+    Alert if any PVC is above 80% capacity.
+    Also check if any Longhorn volumes are in degraded or faulted state.
+  timeout: 90
+  mode: monitor
+---
+# Immich-specific health check - runs every 30 minutes
+# Monitors all Immich components for issues
+apiVersion: holmesgpt.dev/v1alpha1
+kind: ScheduledHealthCheck
+metadata:
+  name: immich-health
+  namespace: holmesgpt
+spec:
+  schedule: "*/30 * * * *"
+  enabled: true
+  query: >-
+    Check the health of all components in the immich namespace:
+    server, machine-learning, postgres, and redis.
+    Look at pod status, recent restarts, memory usage trends,
+    and any error logs. Report any anomalies.
+  timeout: 120
+  mode: monitor

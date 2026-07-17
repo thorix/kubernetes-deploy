@@ -1,0 +1,7 @@
+# ollama deployment
+
+namespace: ollama
+
+helm:
+- valuesFiles:
+  - values.yaml

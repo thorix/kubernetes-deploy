@@ -1,0 +1,71 @@
+# llama.cpp server configuration
+# Local LLM inference with Vulkan GPU acceleration
+
+image:
+  repository: ghcr.io/ggml-org/llama.cpp
+  # Available tags:
+  #   full-vulkan: Vulkan GPU support (AMD/Intel)
+  #   full-cuda: CUDA GPU support (NVIDIA)
+  #   full: CPU only
+  # Note: These are rolling tags, not versioned
+  tag: "full-vulkan"
+  pullPolicy: Always
+
+# Model configuration
+model:
+  # HuggingFace model to download
+  # Format: org/repo:quantization
+  huggingface: "unsloth/gemma-3-4b-it-GGUF:Q4_K_XL"
+  # Local models directory
+  modelsDir: /models
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# GPU configuration
+gpu:
+  enabled: true
+  # Mount /dev/dri for Vulkan GPU access
+  driMount: true
+  # Run as privileged for GPU access
+  privileged: true
+
+# Node pinning (GPU node) is environment-specific -> private overlay
+# (rye/llama-cpp/values.yaml). Omitted from the base.
+
+# Storage for models
+storage:
+  # Host path for model cache
+  hostPath: /var/mnt/local-storage/models
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    memory: 2Gi
+
+# Service configuration
+service:
+  type: NodePort
+  port: 8080
+  nodePort: 30080
+  annotations:
+    # Homepage auto-discovery
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "llama.cpp"
+    gethomepage.dev/description: "Local LLM inference"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "si-meta"
+    gethomepage.dev/href: "https://llama-cpp.lan"
+
+# HTTPRoute configuration
+httproute:
+  enabled: true
+  hostname: ""  # Set in values.prod.yaml
+  gateway:
+    name: http-gateway
+    namespace: kube-system
