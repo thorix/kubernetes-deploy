@@ -1,6 +1,0 @@
-apiVersion: v2
-name: cluster-infrastructure
-description: Cluster-level infrastructure components (RBAC, device plugins, storage classes, network policies)
-type: application
-version: 0.1.0
-appVersion: "1.0"
