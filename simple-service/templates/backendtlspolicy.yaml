@@ -1,0 +1,39 @@
+{{- $enabled := ((.Values.backendTLSPolicy).enabled) | default false -}}
+{{- if $enabled }}
+{{- $caCM := ((.Values.backendTLSPolicy).caConfigMap) | default dict }}
+{{- $caName := $caCM.name | default (printf "%s-backend-ca" (include "simple-service.fullname" .)) }}
+{{- if $caCM.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $caName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+    {{- $caCM.caCert | nindent 4 }}
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ include "simple-service.fullname" . }}
+      {{- with (.Values.backendTLSPolicy).sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  validation:
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: {{ $caName }}
+    hostname: {{ (.Values.backendTLSPolicy).hostname | quote }}
+{{- end }}
