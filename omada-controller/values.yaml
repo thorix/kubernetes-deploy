@@ -143,13 +143,15 @@ probes:
     timeoutSeconds: 5
     failureThreshold: 3
 
-# Omada controller needs room — it runs MongoDB + Java
+# Omada controller needs room — it runs MongoDB + Java.
+# 1Gi OOMKilled the container repeatedly once real data was migrated in;
+# MongoDB's cache grows with the dataset, so the ceiling has to clear it.
 resources:
   requests:
     cpu: 200m
-    memory: 512Mi
-  limits:
     memory: 1Gi
+  limits:
+    memory: 2Gi
 
 # Run as the same UID/GID the container expects
 podSecurityContext:
