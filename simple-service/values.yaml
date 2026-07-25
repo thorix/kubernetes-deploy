@@ -287,3 +287,29 @@ networkPolicy:
   ingress:
     gatewayOnly: false
     customRules: []
+
+# cert-manager Certificate for the workload (e.g. backend TLS)
+certificate:
+  enabled: false
+  # secretName defaults to <fullname>-tls
+  secretName: ""
+  dnsNames: []
+  issuerRef:
+    name: ""
+    kind: ClusterIssuer
+
+# Gateway API BackendTLSPolicy: gateway originates TLS to the backend Service
+# Requires Gateway API >= v1.4 CRDs and Cilium >= 1.20
+backendTLSPolicy:
+  enabled: false
+  # Service port name the policy applies to
+  sectionName: ""
+  # SNI + SAN the gateway validates on the backend cert
+  hostname: ""
+  caConfigMap:
+    # render a ConfigMap holding the CA used to verify the backend cert
+    create: false
+    # name defaults to <fullname>-backend-ca
+    name: ""
+    # PEM of the CA certificate (set in private overlay)
+    caCert: ""

@@ -1,0 +1,19 @@
+{{- $enabled := ((.Values.certificate).enabled) | default false -}}
+{{- if $enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "simple-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "simple-service.labels" . | nindent 4 }}
+spec:
+  secretName: {{ (.Values.certificate).secretName | default (printf "%s-tls" (include "simple-service.fullname" .)) }}
+  dnsNames:
+    {{- range (.Values.certificate).dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  issuerRef:
+    name: {{ ((.Values.certificate).issuerRef).name }}
+    kind: {{ ((.Values.certificate).issuerRef).kind | default "ClusterIssuer" }}
+{{- end }}
