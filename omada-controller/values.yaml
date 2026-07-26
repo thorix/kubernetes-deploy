@@ -56,6 +56,8 @@ ports:
 
 # Service is still useful for in-cluster access (e.g., HTTPRoute for web UI)
 # With hostNetwork the service selects the pod but traffic can also go direct
+# Service fronts the controller for both the web UI (via HTTPRoute) and for
+# device traffic from access points, which reaches it on the LoadBalancer VIP.
 service:
   enabled: true
   type: ClusterIP
@@ -67,6 +69,42 @@ service:
     - name: mgmt-http
       port: 8088
       targetPort: 8088
+      protocol: TCP
+    - name: portal-https
+      port: 8843
+      targetPort: 8843
+      protocol: TCP
+    - name: discovery
+      port: 29810
+      targetPort: 29810
+      protocol: UDP
+    - name: app-discovery
+      port: 27001
+      targetPort: 27001
+      protocol: UDP
+    - name: manager-v1
+      port: 29811
+      targetPort: 29811
+      protocol: TCP
+    - name: adopt-v1
+      port: 29812
+      targetPort: 29812
+      protocol: TCP
+    - name: upgrade-v1
+      port: 29813
+      targetPort: 29813
+      protocol: TCP
+    - name: manager-v2
+      port: 29814
+      targetPort: 29814
+      protocol: TCP
+    - name: transfer-v2
+      port: 29815
+      targetPort: 29815
+      protocol: TCP
+    - name: rtty
+      port: 29816
+      targetPort: 29816
       protocol: TCP
 
 # Environment variables matching the current container config
