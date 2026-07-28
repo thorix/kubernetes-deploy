@@ -54,8 +54,6 @@ ports:
     containerPort: 29816
     protocol: TCP
 
-# Service is still useful for in-cluster access (e.g., HTTPRoute for web UI)
-# With hostNetwork the service selects the pod but traffic can also go direct
 # Service fronts the controller for both the web UI (via HTTPRoute) and for
 # device traffic from access points, which reaches it on the LoadBalancer VIP.
 service:
