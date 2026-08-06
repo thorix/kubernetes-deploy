@@ -90,9 +90,12 @@ vault:
     api: opnsense-mcp/api
 
 # Resource limits
+# NOTE: large OPNsense API responses (e.g., firewall logs ~1.5MB JSON) previously
+# caused repeated OOMKills with 512Mi limit. Increased to 1Gi to accommodate
+# peak memory usage from bulk API queries.
 resources:
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 256Mi
   limits:
-    memory: 512Mi
+    memory: 1Gi
