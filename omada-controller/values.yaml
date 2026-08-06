@@ -1,6 +1,6 @@
 # Omada SDN Controller
 # Manages TP-Link EAP access points
-# Runs with hostNetwork so APs can discover the controller via UDP broadcast
+# Reachable on a LoadBalancer VIP so the address survives rescheduling
 
 workloadType: StatefulSet
 
@@ -11,12 +11,12 @@ image:
 
 replicaCount: 1
 
-# hostNetwork: pod gets the node's IP directly
-# Required for AP discovery via UDP broadcast on the LAN
-hostNetwork: true
-
-# Pinned to a fixed node so the controller IP is stable. The node name is
-# environment-specific -> private overlay (rye/omada-controller/values.yaml).
+# Pod networking, not hostNetwork: devices reach the controller on a
+# LoadBalancer VIP, so its address no longer depends on which node runs it.
+# Same-subnet UDP broadcast discovery is lost, which costs nothing here — the
+# access point is on another subnet and has always used a configured
+# controller address. Devices added to the node subnet would need DHCP
+# option 138 or manual adoption.
 
 # All ports the Omada controller needs
 ports:
@@ -54,8 +54,6 @@ ports:
     containerPort: 29816
     protocol: TCP
 
-# Service is still useful for in-cluster access (e.g., HTTPRoute for web UI)
-# With hostNetwork the service selects the pod but traffic can also go direct
 # Service fronts the controller for both the web UI (via HTTPRoute) and for
 # device traffic from access points, which reaches it on the LoadBalancer VIP.
 service:
