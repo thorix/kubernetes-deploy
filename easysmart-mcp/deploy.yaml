@@ -1,0 +1,8 @@
+# easysmart-mcp deployment using simple-service chart
+
+namespace: easysmart-mcp
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../easysmart-mcp/values.yaml

@@ -1,0 +1,78 @@
+# Easy Smart PoE switch MCP server — TL-SG1218MPE HTTP web-UI control
+# Native Python MCP server (Streamable HTTP) — no supergateway, baked image.
+# See localfiles/network-mapping/easysmart-mcp-design.md for rationale.
+
+image:
+  repository: harbor.lan/library/easysmart-mcp
+  tag: "v0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1   # hard requirement: switch has one session slot
+
+containerPort: 3000
+
+# Environment variables
+# NOTE: EASYSMART_URL is the switch address — environment-specific. The real value
+# lives in the private config overlay (rye/easysmart-mcp/values.yaml); the .lan
+# placeholder keeps this base renderable without exposing a real network address.
+env:
+- name: EASYSMART_URL
+  value: "http://poeswitch.lan"
+- name: EASYSMART_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: easysmart-mcp-simple-service-credentials
+      key: EASYSMART_USERNAME
+- name: EASYSMART_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: easysmart-mcp-simple-service-credentials
+      key: EASYSMART_PASSWORD
+
+probes:
+  enabled: true
+  liveness:
+    type: http
+    path: /healthz
+    port: 3000
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    type: http
+    path: /healthz
+    port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 3
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+serviceAccount:
+  create: true
+  name: "easysmart-mcp"
+
+# Vault integration for switch web-UI credentials
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  kubernetes:
+    mountPath: kubernetes
+    role: easysmart-mcp
+    serviceAccount: easysmart-mcp
+    audience: vault
+    tokenTTL: 86400
+  secrets:
+    credentials: easysmart-mcp/credentials
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 256Mi
