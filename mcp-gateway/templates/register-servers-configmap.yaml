@@ -36,6 +36,20 @@ data:
       exit 1
     fi
 
+    # /gateways, /tools, and /servers are all paginated: the default page
+    # size is 50 items (pagination_default_page_size), and each endpoint's
+    # own list_* service method explicitly documents "limit=0" as "0 for
+    # unlimited" / "0 means all (no limit)" (verified by reading the pinned
+    # v1.0.0-RC-3 source: gateway_service.py's list_gateways, tool_service's
+    # list_tools route in main.py, and server_service.py's list_servers all
+    # say this in their own docstrings). Every list fetch below passes
+    # ?limit=0 so a deployment that grows past 50 gateways/tools/servers
+    # doesn't silently see only page 1 again - which is exactly what
+    # happened before this fix: with 100 tools registered, every /tools
+    # fetch below silently returned only the first 50, so 24 declared
+    # "ops" tools that happened to live on page 2 were reported "missing"
+    # even though jq was now parsing correctly.
+
     # Fetch existing gateways once so registration can be compare-then-act
     # (idempotent) instead of unconditionally delete+recreate on every run.
     # Unconditional delete+recreate forces tool rediscovery but means this
@@ -45,7 +59,7 @@ data:
     # registered yet", same as a fresh install) rather than aborting the
     # whole script under `set -e` with no diagnostic.
     echo "Fetching existing gateways..."
-    EXISTING_GATEWAYS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN") \
+    EXISTING_GATEWAYS=$(curl -sf "$GATEWAY_URL/gateways?limit=0" -H "Authorization: Bearer $TOKEN") \
       || EXISTING_GATEWAYS="[]"
 
     # GET /gateways ("GatewayRead") does not eager-load the tools relationship,
@@ -54,7 +68,7 @@ data:
     # gateway's tool count by its name prefix ("<gateway>-<tool>", the same
     # convention the associatedGateways virtual-server logic below relies on).
     echo "Fetching existing tools..."
-    EXISTING_TOOLS=$(curl -sf "$GATEWAY_URL/tools" -H "Authorization: Bearer $TOKEN") \
+    EXISTING_TOOLS=$(curl -sf "$GATEWAY_URL/tools?limit=0" -H "Authorization: Bearer $TOKEN") \
       || EXISTING_TOOLS="[]"
 
     echo "Registering MCP gateways..."
@@ -146,7 +160,7 @@ data:
         # of failing loudly. Force curl's failure into valid JSON ("[]")
         # before it ever reaches jq, so the whole substitution deterministically
         # yields "0" on failure.
-        STILL_EXISTS=$( { curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
+        STILL_EXISTS=$( { curl -sf "$GATEWAY_URL/gateways?limit=0" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
           | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)] | length' )
         if [ "$STILL_EXISTS" -lt 1 ]; then
           echo "ERROR: gateway {{ .name }} was deleted to apply a config change, but the recreate did not succeed (or could not be verified) - it no longer exists."
@@ -180,7 +194,7 @@ data:
     MISSING_TOOLS=""
     ELAPSED=0
     while true; do
-      ALL_TOOLS=$(curl -sf "$GATEWAY_URL/tools" -H "Authorization: Bearer $TOKEN") || ALL_TOOLS="[]"
+      ALL_TOOLS=$(curl -sf "$GATEWAY_URL/tools?limit=0" -H "Authorization: Bearer $TOKEN") || ALL_TOOLS="[]"
 
       MISSING_TOOLS=""
       for TOOL_NAME in $DECLARED_TOOL_NAMES; do
@@ -246,7 +260,7 @@ data:
     # curl failure to valid JSON before piping into jq, since a bare
     # `|| fallback` after `curl | jq` never fires under POSIX sh - jq's
     # exit status wins, not curl's)
-    EXISTING_VS=$( { curl -sf "$GATEWAY_URL/servers" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
+    EXISTING_VS=$( { curl -sf "$GATEWAY_URL/servers?limit=0" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
       | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)][0].id // empty' )
     if [ -n "$EXISTING_VS" ]; then
       echo "  Deleting existing virtual server {{ .name }} ($EXISTING_VS)..."
