@@ -1,0 +1,9 @@
+# home-docs — MkDocs Material site built in-cluster from thorix/home-docs
+# Design: kubernetes-deploy-docs/docs/superpowers/specs/2026-08-15-home-docs-site-design.md
+
+namespace: home-docs
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../home-docs/values.yaml

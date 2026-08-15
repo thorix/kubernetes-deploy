@@ -1,0 +1,231 @@
+# Home docs site — nginx serves a MkDocs build produced in-pod from
+# git@github.com:thorix/home-docs.git. The build output lives on the PVC so
+# the site keeps serving when GitHub is unreachable, which is the outage the
+# site exists for.
+
+image:
+  repository: nginxinc/nginx-unprivileged
+  tag: "1.31.3-alpine"
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+replicaCount: 1
+
+# RWO volume: a rolling update would deadlock on volume attachment.
+strategy:
+  type: Recreate
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+persistence:
+  enabled: true
+  mountPath: /srv
+  size: 1Gi
+  storageClass: longhorn
+  accessModes:
+    - ReadWriteOnce
+
+podSecurityContext:
+  fsGroup: 101
+
+securityContext:
+  runAsUser: 101
+  runAsGroup: 101
+  runAsNonRoot: true
+
+probes:
+  enabled: true
+  liveness:
+    type: http
+    path: /healthz
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    type: http
+    path: /
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# nginx reads *.conf from this directory, so known_hosts sitting alongside
+# default.conf is inert. Both files are also mounted into the build
+# containers, which is why they share one ConfigMap.
+configMap:
+  enabled: true
+  mountPath: /etc/nginx/conf.d
+  files:
+    default.conf: |
+      server {
+        listen 8080;
+        server_name _;
+        root /srv/current;
+        index index.html;
+        disable_symlinks off;
+        location = /healthz {
+          access_log off;
+          return 200 "ok\n";
+        }
+        location / {
+          try_files $uri $uri/ =404;
+        }
+      }
+    known_hosts: |
+      github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+
+initContainers:
+  - name: bootstrap
+    image: squidfunk/mkdocs-material:9.7.7
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      runAsUser: 101
+      runAsGroup: 101
+      runAsNonRoot: true
+    env:
+      - name: HOME
+        value: /tmp
+      - name: GIT_SSH_COMMAND
+        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts"
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        set -eu
+        if [ -e /srv/current ]; then
+          echo "existing build present, skipping bootstrap"
+          exit 0
+        fi
+        rm -rf /srv/repo
+        git clone --depth 1 git@github.com:thorix/home-docs.git /srv/repo
+        SHA=$(git -C /srv/repo rev-parse --short HEAD)
+        mkdocs build -f /srv/repo/mkdocs.yml -d "/srv/builds/$SHA" --strict
+        ln -sfn "/srv/builds/$SHA" /srv/current
+        echo "bootstrapped $SHA"
+    volumeMounts:
+      - name: data
+        mountPath: /srv
+      - name: git-key
+        mountPath: /etc/git-key
+        readOnly: true
+      - name: config
+        mountPath: /etc/git-config
+        readOnly: true
+      - name: tmp
+        mountPath: /tmp
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+extraContainers:
+  - name: refresh
+    image: squidfunk/mkdocs-material:9.7.7
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      runAsUser: 101
+      runAsGroup: 101
+      runAsNonRoot: true
+    env:
+      - name: HOME
+        value: /tmp
+      - name: GIT_SSH_COMMAND
+        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts"
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        set -u
+        while true; do
+          sleep 300
+          if [ ! -d /srv/repo/.git ]; then
+            echo "no checkout yet; bootstrap has not succeeded"
+            continue
+          fi
+          if ! git -C /srv/repo fetch --quiet origin main; then
+            echo "fetch failed (offline?); keeping current build"
+            continue
+          fi
+          LOCAL=$(git -C /srv/repo rev-parse HEAD)
+          REMOTE=$(git -C /srv/repo rev-parse origin/main)
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            continue
+          fi
+          git -C /srv/repo reset --hard origin/main
+          SHA=$(git -C /srv/repo rev-parse --short HEAD)
+          if mkdocs build -f /srv/repo/mkdocs.yml -d "/srv/builds/$SHA" --strict; then
+            ln -sfn "/srv/builds/$SHA" /srv/current
+            echo "published $SHA"
+            ls -1dt /srv/builds/*/ 2>/dev/null | tail -n +4 | xargs -r rm -rf
+          else
+            echo "build failed for $SHA; keeping previous build"
+            rm -rf "/srv/builds/$SHA"
+          fi
+        done
+    volumeMounts:
+      - name: data
+        mountPath: /srv
+      - name: git-key
+        mountPath: /etc/git-key
+        readOnly: true
+      - name: config
+        mountPath: /etc/git-config
+        readOnly: true
+      - name: tmp
+        mountPath: /tmp
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+volumes:
+  - name: git-key
+    secret:
+      secretName: home-docs-simple-service-deploykey
+      defaultMode: 0400
+  - name: tmp
+    emptyDir: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  mount: "kv"
+  refreshAfter: "1h"
+  kubernetes:
+    mountPath: "kubernetes"
+    role: "home-docs"
+    audience: "vault"
+    tokenTTL: 86400
+  secrets:
+    deploykey: "home-docs/deploy-key"
+
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: true
+  egress:
+    denyAll: true
+    allowDNS: true
+    customRules:
+      - toFQDNs:
+          - matchName: "github.com"
+        toPorts:
+          - ports:
+              - port: "22"
+                protocol: TCP
