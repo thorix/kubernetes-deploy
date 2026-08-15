@@ -33,7 +33,12 @@ spec:
             defaultMode: 0755
       containers:
         - name: register-servers
-          image: curlimages/curl:latest
+          # alpine (not curlimages/curl) because register.sh needs jq for
+          # robust JSON parsing of the gateway API responses; curl and jq
+          # are installed at container start (`apk add --no-cache curl jq`,
+          # first line of register.sh) - matches this repo's existing
+          # convention for other MCP deployments.
+          image: alpine:3.20
           env:
             - name: PLATFORM_ADMIN_EMAIL
               valueFrom:

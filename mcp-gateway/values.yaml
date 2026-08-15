@@ -309,4 +309,13 @@ virtualServers:
       - haystack-undeploy-pipeline
       - haystack-get-pipeline-status
       - haystack-get-all-pipeline-statuses
+      # easysmart-config-backup excluded: returns a base64 blob, not
+      # actionable for an agent. easysmart-vlan-set and easysmart-pvid-set
+      # excluded: write paths not yet hardware-verified.
+      - easysmart-poe-cycle
+      - easysmart-poe-get
+      - easysmart-poe-set
+      - easysmart-system-info
+      - easysmart-port-stats
+      - easysmart-vlan-get
     visibility: public

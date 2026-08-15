@@ -10,6 +10,9 @@ data:
   register.sh: |
     set -e
 
+    echo "Installing curl + jq..."
+    apk add --no-cache curl jq > /dev/null
+
     GATEWAY_URL="http://{{ .Release.Name }}-mcpgateway.{{ .Release.Namespace }}.svc.cluster.local"
 
     echo "Waiting for MCP Gateway to be ready..."
@@ -26,66 +29,157 @@ data:
     TOKEN=$(curl -sf -X POST "$GATEWAY_URL/auth/login" \
       -H "Content-Type: application/json" \
       -d "{\"email\":\"$PLATFORM_ADMIN_EMAIL\",\"password\":\"$PLATFORM_ADMIN_PASSWORD\"}" \
-      | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+      | jq -r '.access_token // empty')
 
     if [ -z "$TOKEN" ]; then
       echo "Failed to get auth token"
       exit 1
     fi
 
+    # Fetch existing gateways once so registration can be compare-then-act
+    # (idempotent) instead of unconditionally delete+recreate on every run.
+    # Unconditional delete+recreate forces tool rediscovery but means this
+    # script can never safely run on a schedule - only as a one-shot PostSync
+    # hook - so a no-op run must be a true no-op.
+    echo "Fetching existing gateways..."
+    EXISTING_GATEWAYS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN")
+
     echo "Registering MCP gateways..."
     {{- range .Values.mcpServers }}
 
-    echo "Registering gateway: {{ .name }}"
+    echo "Processing gateway: {{ .name }}"
 
-    # Check if gateway already exists and delete it to force tool re-discovery
-    EXISTING_ID=$(curl -sf "$GATEWAY_URL/gateways" \
-      -H "Authorization: Bearer $TOKEN" \
-      | sed -n 's/.*"id":"\([^"]*\)".*"name":"{{ .name }}".*/\1/p' | head -1)
+    EXISTING=$(echo "$EXISTING_GATEWAYS" | jq -c --arg name "{{ .name }}" '[.[] | select(.name == $name)][0] // empty')
+    EXISTING_ID=$(echo "$EXISTING" | jq -r '.id // empty')
+    EXISTING_URL=$(echo "$EXISTING" | jq -r '.url // empty')
+    EXISTING_TRANSPORT=$(echo "$EXISTING" | jq -r '.transport // empty')
+    EXISTING_DESC=$(echo "$EXISTING" | jq -r '.description // empty')
+    EXISTING_TOOL_COUNT=$(echo "$EXISTING" | jq -r '.tool_count // 0')
 
-    if [ -n "$EXISTING_ID" ]; then
-      echo "Deleting existing gateway {{ .name }} ($EXISTING_ID) to refresh tools..."
-      curl -sf -X DELETE "$GATEWAY_URL/gateways/$EXISTING_ID" \
-        -H "Authorization: Bearer $TOKEN" || true
-      sleep 2
+    DECLARED_URL="{{ .url }}"
+    DECLARED_TRANSPORT="{{ .transport | default "SSE" }}"
+    DECLARED_DESC="{{ .description | default "" }}"
+
+    if [ -n "$EXISTING_ID" ] \
+      && [ "$EXISTING_URL" = "$DECLARED_URL" ] \
+      && [ "$EXISTING_TRANSPORT" = "$DECLARED_TRANSPORT" ] \
+      && [ "$EXISTING_DESC" = "$DECLARED_DESC" ] \
+      && [ "$EXISTING_TOOL_COUNT" -gt 0 ]; then
+
+      echo "  Gateway {{ .name }} unchanged (id=$EXISTING_ID, tools=$EXISTING_TOOL_COUNT) - skipping"
+
+    elif [ -n "$EXISTING_ID" ] \
+      && [ "$EXISTING_URL" = "$DECLARED_URL" ] \
+      && [ "$EXISTING_TRANSPORT" = "$DECLARED_TRANSPORT" ] \
+      && [ "$EXISTING_DESC" = "$DECLARED_DESC" ]; then
+
+      # Config is unchanged but no tools have been discovered yet (e.g. the
+      # downstream MCP server was unreachable on a previous run).
+      # mcp-context-forge >= v1.0.0-RC-3 exposes
+      # POST /gateways/{id}/tools/refresh, which forces immediate
+      # re-discovery of an existing gateway's tools in place - so prefer
+      # that over a disruptive delete+recreate.
+      echo "  Gateway {{ .name }} unchanged but has 0 tools - refreshing (id=$EXISTING_ID)..."
+      curl -sf -X POST "$GATEWAY_URL/gateways/$EXISTING_ID/tools/refresh" \
+        -H "Authorization: Bearer $TOKEN" > /dev/null \
+        || echo "  WARNING: refresh failed for {{ .name }} (gateway may be unreachable; continuing)"
+
+    else
+
+      # Either a brand-new gateway, or an existing one whose
+      # url/transport/description changed. The refresh endpoint only
+      # re-discovers tools for a gateway's *existing* registration - it
+      # cannot change url/transport/description - so a genuine config change
+      # still needs delete+recreate to take effect. (This is the one case
+      # where delete+recreate remains necessary; there is no update-in-place
+      # endpoint that also forces rediscovery.)
+      if [ -n "$EXISTING_ID" ]; then
+        echo "  Deleting existing gateway {{ .name }} ($EXISTING_ID) to apply changed config..."
+        curl -sf -X DELETE "$GATEWAY_URL/gateways/$EXISTING_ID" \
+          -H "Authorization: Bearer $TOKEN" || true
+        sleep 2
+      fi
+
+      RESULT=$(curl -sf -X POST "$GATEWAY_URL/gateways" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "{{ .name }}",
+          "url": "{{ .url }}",
+          "description": "{{ .description | default "" }}",
+          "transport": "{{ .transport | default "SSE" }}"
+          {{- if .tags }},
+          "tags": "{{ .tags }}"
+          {{- end }}
+        }' 2>&1) || true
+
+      echo "  Result: $RESULT"
     fi
-
-    RESULT=$(curl -sf -X POST "$GATEWAY_URL/gateways" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{
-        "name": "{{ .name }}",
-        "url": "{{ .url }}",
-        "description": "{{ .description | default "" }}",
-        "transport": "{{ .transport | default "SSE" }}"
-        {{- if .tags }},
-        "tags": "{{ .tags }}"
-        {{- end }}
-      }' 2>&1) || true
-
-    echo "Result: $RESULT"
     {{- end }}
 
     echo "Gateway registration complete"
 
-    # Wait for tools to be discovered from gateways
+    {{- if .Values.virtualServers }}
+    # Declared tool names across all virtual servers' `tools:` lists. (Not
+    # `associatedGateways:` lists - those pull in whatever tools a gateway
+    # happens to have at creation time and have no fixed name list to verify
+    # against.)
+    DECLARED_TOOL_NAMES="{{ range .Values.virtualServers }}{{ range .tools }}{{ . }} {{ end }}{{ end }}"
+
+    # Tool discovery from a freshly-(re)registered gateway is asynchronous.
+    # Poll instead of trusting a single fixed sleep: re-fetch /tools every 5s
+    # for up to 60s until every declared tool resolves. A tool that never
+    # resolves used to just log a WARNING and silently degrade the virtual
+    # server - this is exactly how "ops" quietly ended up with only 10 of 34
+    # declared tools. Now it is a hard failure so the PostSync hook fails and
+    # ArgoCD surfaces it instead of the drift going unnoticed.
     echo "Waiting for tools to be discovered..."
     sleep 10
 
-    {{- if .Values.virtualServers }}
-    # Fetch all tools once for virtual server creation
-    ALL_TOOLS=$(curl -sf "$GATEWAY_URL/tools" \
-      -H "Authorization: Bearer $TOKEN")
+    ALL_TOOLS="[]"
+    MISSING_TOOLS=""
+    ELAPSED=0
+    while true; do
+      ALL_TOOLS=$(curl -sf "$GATEWAY_URL/tools" -H "Authorization: Bearer $TOKEN") || ALL_TOOLS="[]"
+
+      MISSING_TOOLS=""
+      for TOOL_NAME in $DECLARED_TOOL_NAMES; do
+        FOUND=$(echo "$ALL_TOOLS" | jq -r --arg name "$TOOL_NAME" '[.[] | select(.name == $name)] | length')
+        if [ "$FOUND" -eq 0 ]; then
+          MISSING_TOOLS="${MISSING_TOOLS:+$MISSING_TOOLS }$TOOL_NAME"
+        fi
+      done
+
+      if [ -z "$MISSING_TOOLS" ]; then
+        echo "All declared tools discovered."
+        break
+      fi
+
+      if [ "$ELAPSED" -ge 60 ]; then
+        break
+      fi
+
+      echo "  Still missing (${ELAPSED}s elapsed): $MISSING_TOOLS"
+      sleep 5
+      ELAPSED=$((ELAPSED + 5))
+    done
+
+    if [ -n "$MISSING_TOOLS" ]; then
+      echo "ERROR: the following declared tools were never discovered by the gateway:"
+      for TOOL_NAME in $MISSING_TOOLS; do
+        echo "  - $TOOL_NAME"
+      done
+      exit 1
+    fi
 
     echo "Creating virtual servers..."
     {{- range .Values.virtualServers }}
 
     TOOL_IDS=""
     {{- if .tools }}
-    # Select specific tools by name
+    # Select specific tools by name (already verified present above)
     for TOOL_NAME in {{ range .tools }}"{{ . }}" {{ end }}; do
-      TOOL_ID=$(echo "$ALL_TOOLS" \
-        | sed -n "s/.*\"id\":\"\([^\"]*\)\".*\"name\":\"$TOOL_NAME\".*/\1/p" | head -1)
+      TOOL_ID=$(echo "$ALL_TOOLS" | jq -r --arg name "$TOOL_NAME" '[.[] | select(.name == $name)][0].id // empty')
       if [ -n "$TOOL_ID" ]; then
         echo "  Found tool: $TOOL_NAME ($TOOL_ID)"
         TOOL_IDS="${TOOL_IDS:+$TOOL_IDS,}$TOOL_ID"
@@ -94,27 +188,23 @@ data:
       fi
     done
     {{- else if .associatedGateways }}
-    # Select all tools from associated gateways
+    # Select all tools from associated gateways (gateway-prefixed names)
     for GATEWAY_NAME in {{ range .associatedGateways }}"{{ . }}" {{ end }}; do
       GATEWAY_TOOLS=$(echo "$ALL_TOOLS" \
-        | sed -n 's/.*"id":"\([^"]*\)".*"name":"'$GATEWAY_NAME'-[^"]*".*/\1/gp' \
-        | tr '\n' ',' | sed 's/,$//')
+        | jq -r --arg prefix "$GATEWAY_NAME-" '[.[] | select(.name | startswith($prefix))] | map(.id) | join(",")')
       if [ -n "$GATEWAY_TOOLS" ]; then
         TOOL_IDS="${TOOL_IDS:+$TOOL_IDS,}$GATEWAY_TOOLS"
       fi
     done
     {{- end }}
 
-    # Convert to JSON array
-    TOOL_ARRAY=$(echo "$TOOL_IDS" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
-    if [ "$TOOL_ARRAY" = "[\"\"]" ]; then
-      TOOL_ARRAY="[]"
-    fi
+    # Convert comma-separated IDs to a JSON array
+    TOOL_ARRAY=$(printf '%s' "$TOOL_IDS" | jq -R -c 'split(",") | map(select(length > 0))')
 
     # Delete existing virtual server if present
     EXISTING_VS=$(curl -sf "$GATEWAY_URL/servers" \
       -H "Authorization: Bearer $TOKEN" \
-      | sed -n 's/.*"id":"\([^"]*\)".*"name":"{{ .name }}".*/\1/p' | head -1)
+      | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)][0].id // empty')
     if [ -n "$EXISTING_VS" ]; then
       echo "  Deleting existing virtual server {{ .name }} ($EXISTING_VS)..."
       curl -sf -X DELETE "$GATEWAY_URL/servers/$EXISTING_VS" \
