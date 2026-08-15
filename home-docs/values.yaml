@@ -70,6 +70,7 @@ configMap:
         root /srv/current;
         index index.html;
         disable_symlinks off;
+        error_page 404 /404.html;
         location = /healthz {
           access_log off;
           return 200 "ok\n";
@@ -93,7 +94,7 @@ initContainers:
       - name: HOME
         value: /tmp
       - name: GIT_SSH_COMMAND
-        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts"
+        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts -o UpdateHostKeys=no"
     command: ["/bin/sh", "-c"]
     args:
       - |
@@ -138,7 +139,7 @@ extraContainers:
       - name: HOME
         value: /tmp
       - name: GIT_SSH_COMMAND
-        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts"
+        value: "ssh -i /etc/git-key/ssh-privatekey -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/git-config/known_hosts -o UpdateHostKeys=no"
     command: ["/bin/sh", "-c"]
     args:
       - |
@@ -146,8 +147,17 @@ extraContainers:
         while true; do
           sleep 300
           if [ ! -d /srv/repo/.git ]; then
-            echo "no checkout yet; bootstrap has not succeeded"
-            continue
+            if [ -e /srv/current ]; then
+              echo "/srv/repo missing but a build exists; re-cloning"
+              rm -rf /srv/repo
+              if ! git clone --depth 1 git@github.com:thorix/home-docs.git /srv/repo; then
+                echo "re-clone failed (offline?); keeping current build"
+                continue
+              fi
+            else
+              echo "no checkout yet; bootstrap has not succeeded"
+              continue
+            fi
           fi
           if ! git -C /srv/repo fetch --quiet origin main; then
             echo "fetch failed (offline?); keeping current build"
@@ -193,7 +203,8 @@ volumes:
       secretName: home-docs-simple-service-deploykey
       defaultMode: 0400
   - name: tmp
-    emptyDir: {}
+    emptyDir:
+      sizeLimit: 256Mi
 
 resources:
   requests:
@@ -221,8 +232,26 @@ networkPolicy:
     gatewayOnly: true
   egress:
     denyAll: true
-    allowDNS: true
+    # DNS is declared here as an L7 rule (rules.dns) rather than the chart's
+    # allowDNS: Cilium's DNS proxy must observe the query to resolve the
+    # toFQDNs allowlist below, so a plain L4 :53 allow is insufficient — the
+    # FQDN selector never gets an IP set and the clone to github.com hangs.
+    # Do not "simplify" this back to allowDNS: true.
+    allowDNS: false          # replaced by the L7 rule below — required for toFQDNs
     customRules:
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s:k8s-app: kube-dns
+        toPorts:
+          - ports:
+              - port: "53"
+                protocol: UDP
+              - port: "53"
+                protocol: TCP
+            rules:
+              dns:
+                - matchPattern: "*"
       - toFQDNs:
           - matchName: "github.com"
         toPorts:
