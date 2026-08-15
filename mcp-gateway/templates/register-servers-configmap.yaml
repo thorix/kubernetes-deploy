@@ -137,9 +137,17 @@ data:
       # Result line above without a hard fail (the target MCP server may
       # just be unreachable). So verify only after a delete+recreate.
       if [ "$WAS_RECREATE" = "true" ]; then
-        STILL_EXISTS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN" \
-          | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)] | length') \
-          || STILL_EXISTS=0
+        # POSIX sh has no `pipefail`, so `curl | jq`'s exit status is jq's,
+        # not curl's - and jq on empty stdin (what curl -sf yields on a
+        # network failure or HTTP error) exits 0 with empty output. A bare
+        # `|| STILL_EXISTS=0` after the pipe would never fire in that case,
+        # leaving STILL_EXISTS empty and the numeric test below erroring
+        # silently (uncaught by `set -e` inside an `if` condition) instead
+        # of failing loudly. Force curl's failure into valid JSON ("[]")
+        # before it ever reaches jq, so the whole substitution deterministically
+        # yields "0" on failure.
+        STILL_EXISTS=$( { curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
+          | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)] | length' )
         if [ "$STILL_EXISTS" -lt 1 ]; then
           echo "ERROR: gateway {{ .name }} was deleted to apply a config change, but the recreate did not succeed (or could not be verified) - it no longer exists."
           echo "  POST response was: $RESULT"
@@ -234,9 +242,12 @@ data:
     TOOL_ARRAY=$(printf '%s' "$TOOL_IDS" | jq -R -c 'split(",") | map(select(length > 0))')
 
     # Delete existing virtual server if present
-    EXISTING_VS=$(curl -sf "$GATEWAY_URL/servers" \
-      -H "Authorization: Bearer $TOKEN" \
-      | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)][0].id // empty')
+    # (same curl-failure-into-jq treatment as STILL_EXISTS above: force a
+    # curl failure to valid JSON before piping into jq, since a bare
+    # `|| fallback` after `curl | jq` never fires under POSIX sh - jq's
+    # exit status wins, not curl's)
+    EXISTING_VS=$( { curl -sf "$GATEWAY_URL/servers" -H "Authorization: Bearer $TOKEN" || echo "[]"; } \
+      | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)][0].id // empty' )
     if [ -n "$EXISTING_VS" ]; then
       echo "  Deleting existing virtual server {{ .name }} ($EXISTING_VS)..."
       curl -sf -X DELETE "$GATEWAY_URL/servers/$EXISTING_VS" \
