@@ -1,0 +1,146 @@
+{{- if .Values.mcpServers }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mcp-gateway.fullname" . }}-register-script
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcp-gateway.labels" . | nindent 4 }}
+data:
+  register.sh: |
+    set -e
+
+    GATEWAY_URL="http://{{ .Release.Name }}-mcpgateway.{{ .Release.Namespace }}.svc.cluster.local"
+
+    echo "Waiting for MCP Gateway to be ready..."
+    for i in $(seq 1 30); do
+      if curl -sf "$GATEWAY_URL/health" > /dev/null 2>&1; then
+        echo "Gateway is ready"
+        break
+      fi
+      echo "Waiting... ($i/30)"
+      sleep 5
+    done
+
+    echo "Logging in to get token..."
+    TOKEN=$(curl -sf -X POST "$GATEWAY_URL/auth/login" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\":\"$PLATFORM_ADMIN_EMAIL\",\"password\":\"$PLATFORM_ADMIN_PASSWORD\"}" \
+      | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+
+    if [ -z "$TOKEN" ]; then
+      echo "Failed to get auth token"
+      exit 1
+    fi
+
+    echo "Registering MCP gateways..."
+    {{- range .Values.mcpServers }}
+
+    echo "Registering gateway: {{ .name }}"
+
+    # Check if gateway already exists and delete it to force tool re-discovery
+    EXISTING_ID=$(curl -sf "$GATEWAY_URL/gateways" \
+      -H "Authorization: Bearer $TOKEN" \
+      | sed -n 's/.*"id":"\([^"]*\)".*"name":"{{ .name }}".*/\1/p' | head -1)
+
+    if [ -n "$EXISTING_ID" ]; then
+      echo "Deleting existing gateway {{ .name }} ($EXISTING_ID) to refresh tools..."
+      curl -sf -X DELETE "$GATEWAY_URL/gateways/$EXISTING_ID" \
+        -H "Authorization: Bearer $TOKEN" || true
+      sleep 2
+    fi
+
+    RESULT=$(curl -sf -X POST "$GATEWAY_URL/gateways" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "{{ .name }}",
+        "url": "{{ .url }}",
+        "description": "{{ .description | default "" }}",
+        "transport": "{{ .transport | default "SSE" }}"
+        {{- if .tags }},
+        "tags": "{{ .tags }}"
+        {{- end }}
+      }' 2>&1) || true
+
+    echo "Result: $RESULT"
+    {{- end }}
+
+    echo "Gateway registration complete"
+
+    # Wait for tools to be discovered from gateways
+    echo "Waiting for tools to be discovered..."
+    sleep 10
+
+    {{- if .Values.virtualServers }}
+    # Fetch all tools once for virtual server creation
+    ALL_TOOLS=$(curl -sf "$GATEWAY_URL/tools" \
+      -H "Authorization: Bearer $TOKEN")
+
+    echo "Creating virtual servers..."
+    {{- range .Values.virtualServers }}
+
+    TOOL_IDS=""
+    {{- if .tools }}
+    # Select specific tools by name
+    for TOOL_NAME in {{ range .tools }}"{{ . }}" {{ end }}; do
+      TOOL_ID=$(echo "$ALL_TOOLS" \
+        | sed -n "s/.*\"id\":\"\([^\"]*\)\".*\"name\":\"$TOOL_NAME\".*/\1/p" | head -1)
+      if [ -n "$TOOL_ID" ]; then
+        echo "  Found tool: $TOOL_NAME ($TOOL_ID)"
+        TOOL_IDS="${TOOL_IDS:+$TOOL_IDS,}$TOOL_ID"
+      else
+        echo "  WARNING: Tool not found: $TOOL_NAME"
+      fi
+    done
+    {{- else if .associatedGateways }}
+    # Select all tools from associated gateways
+    for GATEWAY_NAME in {{ range .associatedGateways }}"{{ . }}" {{ end }}; do
+      GATEWAY_TOOLS=$(echo "$ALL_TOOLS" \
+        | sed -n 's/.*"id":"\([^"]*\)".*"name":"'$GATEWAY_NAME'-[^"]*".*/\1/gp' \
+        | tr '\n' ',' | sed 's/,$//')
+      if [ -n "$GATEWAY_TOOLS" ]; then
+        TOOL_IDS="${TOOL_IDS:+$TOOL_IDS,}$GATEWAY_TOOLS"
+      fi
+    done
+    {{- end }}
+
+    # Convert to JSON array
+    TOOL_ARRAY=$(echo "$TOOL_IDS" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+    if [ "$TOOL_ARRAY" = "[\"\"]" ]; then
+      TOOL_ARRAY="[]"
+    fi
+
+    # Delete existing virtual server if present
+    EXISTING_VS=$(curl -sf "$GATEWAY_URL/servers" \
+      -H "Authorization: Bearer $TOKEN" \
+      | sed -n 's/.*"id":"\([^"]*\)".*"name":"{{ .name }}".*/\1/p' | head -1)
+    if [ -n "$EXISTING_VS" ]; then
+      echo "  Deleting existing virtual server {{ .name }} ($EXISTING_VS)..."
+      curl -sf -X DELETE "$GATEWAY_URL/servers/$EXISTING_VS" \
+        -H "Authorization: Bearer $TOKEN" || true
+      sleep 1
+    fi
+
+    echo "Creating virtual server: {{ .name }} (${TOOL_ARRAY})"
+    RESULT=$(curl -sf -X POST "$GATEWAY_URL/servers" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{
+        \"server\": {
+          \"name\": \"{{ .name }}\",
+          \"description\": \"{{ .description | default "" }}\",
+          \"associated_tools\": $TOOL_ARRAY,
+          \"visibility\": \"{{ .visibility | default "public" }}\"
+        },
+        \"visibility\": \"{{ .visibility | default "public" }}\"
+      }" 2>&1) || true
+
+    echo "Result: $RESULT"
+    {{- end }}
+
+    echo "Virtual server creation complete"
+    {{- end }}
+
+    echo "MCP Gateway configuration complete"
+{{- end }}
