@@ -19,7 +19,14 @@ metadata:
     # PostSync hook. Do not move the script back inline here.
 spec:
   backoffLimit: 3
-  activeDeadlineSeconds: 300
+  # Up to ~150s waiting for the gateway to become ready, plus up to ~70s of
+  # mandatory tool-discovery polling (10s initial + up to 60s of 5s retries)
+  # before the hard-fail check runs. A SIGTERM mid-script (from the deadline
+  # hitting) is worse than a clean exit 1: for the delete+recreate gateway
+  # path it could fire between the DELETE and the recreate POST, leaving a
+  # gateway deleted with no self-verification step ever running. Sized with
+  # generous headroom above the ~220s worst case rather than cutting it close.
+  activeDeadlineSeconds: 900
   template:
     metadata:
       labels:

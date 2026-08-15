@@ -41,8 +41,21 @@ data:
     # Unconditional delete+recreate forces tool rediscovery but means this
     # script can never safely run on a schedule - only as a one-shot PostSync
     # hook - so a no-op run must be a true no-op.
+    # A transient failure here falls back to "[]" (treated as "nothing
+    # registered yet", same as a fresh install) rather than aborting the
+    # whole script under `set -e` with no diagnostic.
     echo "Fetching existing gateways..."
-    EXISTING_GATEWAYS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN")
+    EXISTING_GATEWAYS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN") \
+      || EXISTING_GATEWAYS="[]"
+
+    # GET /gateways ("GatewayRead") does not eager-load the tools relationship,
+    # so its tool_count field is always 0 - it cannot be used to tell whether
+    # a gateway already has tools. Fetch /tools once instead and derive each
+    # gateway's tool count by its name prefix ("<gateway>-<tool>", the same
+    # convention the associatedGateways virtual-server logic below relies on).
+    echo "Fetching existing tools..."
+    EXISTING_TOOLS=$(curl -sf "$GATEWAY_URL/tools" -H "Authorization: Bearer $TOKEN") \
+      || EXISTING_TOOLS="[]"
 
     echo "Registering MCP gateways..."
     {{- range .Values.mcpServers }}
@@ -54,7 +67,7 @@ data:
     EXISTING_URL=$(echo "$EXISTING" | jq -r '.url // empty')
     EXISTING_TRANSPORT=$(echo "$EXISTING" | jq -r '.transport // empty')
     EXISTING_DESC=$(echo "$EXISTING" | jq -r '.description // empty')
-    EXISTING_TOOL_COUNT=$(echo "$EXISTING" | jq -r '.tool_count // 0')
+    EXISTING_TOOL_COUNT=$(echo "$EXISTING_TOOLS" | jq -r --arg prefix "{{ .name }}-" '[.[] | select(.name | startswith($prefix))] | length')
 
     DECLARED_URL="{{ .url }}"
     DECLARED_TRANSPORT="{{ .transport | default "SSE" }}"
@@ -93,7 +106,9 @@ data:
       # still needs delete+recreate to take effect. (This is the one case
       # where delete+recreate remains necessary; there is no update-in-place
       # endpoint that also forces rediscovery.)
+      WAS_RECREATE="false"
       if [ -n "$EXISTING_ID" ]; then
+        WAS_RECREATE="true"
         echo "  Deleting existing gateway {{ .name }} ($EXISTING_ID) to apply changed config..."
         curl -sf -X DELETE "$GATEWAY_URL/gateways/$EXISTING_ID" \
           -H "Authorization: Bearer $TOKEN" || true
@@ -114,6 +129,23 @@ data:
         }' 2>&1) || true
 
       echo "  Result: $RESULT"
+
+      # Only the recreate path can leave the gateway WORSE off than before
+      # this run (deleted, with nothing to replace it, while the script
+      # still exits 0) - a plain create failing is no worse than the
+      # gateway simply not existing yet, and is already surfaced via the
+      # Result line above without a hard fail (the target MCP server may
+      # just be unreachable). So verify only after a delete+recreate.
+      if [ "$WAS_RECREATE" = "true" ]; then
+        STILL_EXISTS=$(curl -sf "$GATEWAY_URL/gateways" -H "Authorization: Bearer $TOKEN" \
+          | jq -r --arg name "{{ .name }}" '[.[] | select(.name == $name)] | length') \
+          || STILL_EXISTS=0
+        if [ "$STILL_EXISTS" -lt 1 ]; then
+          echo "ERROR: gateway {{ .name }} was deleted to apply a config change, but the recreate did not succeed (or could not be verified) - it no longer exists."
+          echo "  POST response was: $RESULT"
+          exit 1
+        fi
+      fi
     fi
     {{- end }}
 
