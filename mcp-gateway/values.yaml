@@ -257,6 +257,10 @@ mcpServers:
       - trafficshaper_manage
       - trust_manage
       - wireguard_manage
+  - name: easysmart
+    url: "http://easysmart-mcp-simple-service.easysmart-mcp.svc.cluster.local:3000/mcp"
+    transport: "STREAMABLEHTTP"
+    description: "TL-SG1218MPE PoE switch — VLAN, PoE port control, stats"
 
 # Virtual servers aggregate tools from gateways into a single MCP endpoint
 # Claude Code connects to the "ops" virtual server for a curated tool set
