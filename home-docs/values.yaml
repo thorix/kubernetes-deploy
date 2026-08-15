@@ -29,9 +29,14 @@ persistence:
   accessModes:
     - ReadWriteOnce
 
+# fsGroup 101 makes the PVC group-owned by nginx's group and sets g+s on it, so
+# everything the build containers write is group-readable by nginx regardless of
+# which UID wrote it. That is what lets the build and serve containers run as
+# different users.
 podSecurityContext:
   fsGroup: 101
 
+# nginx container: UID 101 is the nginx user in nginx-unprivileged.
 securityContext:
   runAsUser: 101
   runAsGroup: 101
@@ -86,8 +91,14 @@ initContainers:
   - name: bootstrap
     image: squidfunk/mkdocs-material:9.7.7
     imagePullPolicy: IfNotPresent
+    # UID 65534 (nobody), NOT 101. OpenSSH calls getpwuid() at startup and dies
+    # with "No user exists for uid 101" before making any connection — the
+    # mkdocs-material image is Alpine and has no UID 101 (only GID 101, klogd's
+    # group). Do not "fix" this back to 101 for symmetry with the nginx
+    # container; nginx-unprivileged has a 101 user, this image does not.
+    # runAsGroup 101 + fsGroup 101 are what keep the output readable by nginx.
     securityContext:
-      runAsUser: 101
+      runAsUser: 65534
       runAsGroup: 101
       runAsNonRoot: true
     env:
@@ -131,8 +142,10 @@ extraContainers:
   - name: refresh
     image: squidfunk/mkdocs-material:9.7.7
     imagePullPolicy: IfNotPresent
+    # UID 65534 (nobody) for the same reason as the bootstrap container above:
+    # this image has no UID 101, and ssh refuses to start without a passwd entry.
     securityContext:
-      runAsUser: 101
+      runAsUser: 65534
       runAsGroup: 101
       runAsNonRoot: true
     env:
