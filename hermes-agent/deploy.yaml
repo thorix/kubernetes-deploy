@@ -1,0 +1,6 @@
+namespace: hermes-agent
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../hermes-agent/values.yaml

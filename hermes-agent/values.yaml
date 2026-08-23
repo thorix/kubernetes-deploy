@@ -1,0 +1,131 @@
+# Hermes Agent — phase-0 locked-down deploy.
+# Spec: kubernetes-deploy-docs/docs/superpowers/specs/2026-08-23-hermes-agent-deploy-design.md
+workloadType: StatefulSet
+replicaCount: 1
+
+image:
+  repository: nousresearch/hermes-agent
+  # v2026.8.19 linux/amd64 — digest is authoritative; tag kept for readability.
+  tag: "v2026.8.19@sha256:f3cba6abf5ed80d47a271498d663ace5dda87f45000552afb8be8370a35df1b5"
+  pullPolicy: IfNotPresent
+
+# ENTRYPOINT is /init (s6 supervisor: starts root, drops to HERMES_UID/GID).
+# Pass the subcommand as ARGS so /init is preserved (command: would break it).
+args: ["gateway", "run"]
+
+env:
+  - name: HERMES_UID
+    value: "10000"
+  - name: HERMES_GID
+    value: "10000"
+  - name: NOUS_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-credentials
+        key: NOUS_API_KEY
+
+# Phase 0: no inbound. Access is `kubectl port-forward` only.
+service:
+  enabled: false
+httproute:
+  enabled: false
+probes:
+  enabled: false   # no health path wired yet; add once gateway/dashboard health confirmed
+
+# Persistent SQLite/agent data, shared by both containers in the pod.
+volumeClaimTemplates:
+  - name: data
+    mountPath: /opt/data
+    storageClassName: longhorn
+    accessModes: ["ReadWriteOnce"]
+    size: 10Gi
+
+podSecurityContext:
+  fsGroup: 10000   # so the dropped-privilege user (10000) can write /opt/data
+
+# Main (gateway) container hardening. drop ALL, then add back the minimal caps
+# the s6 init needs to set up dirs and drop root->10000. TIGHTEN in Task 3:
+# if the pod starts clean, remove caps one at a time and re-test.
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+    add: ["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE", "FOWNER"]
+
+serviceAccount:
+  name: hermes-agent
+  automountServiceAccountToken: false   # no K8s API access (also the chart default)
+
+# Dashboard as a second container in the same pod (shares localhost + /opt/data).
+extraContainers:
+  - name: dashboard
+    image: "nousresearch/hermes-agent:v2026.8.19@sha256:f3cba6abf5ed80d47a271498d663ace5dda87f45000552afb8be8370a35df1b5"
+    imagePullPolicy: IfNotPresent
+    args: ["dashboard", "--host", "127.0.0.1", "--no-open"]
+    env:
+      - name: HERMES_UID
+        value: "10000"
+      - name: HERMES_GID
+        value: "10000"
+    volumeMounts:
+      - name: data
+        mountPath: /opt/data
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE", "FOWNER"]
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# Vault: sync NOUS_API_KEY from kv-v2 hermes-agent/credentials -> K8s Secret.
+vault:
+  enabled: true
+  kubernetes:
+    role: hermes-agent
+    serviceAccount: hermes-agent
+  secrets:
+    credentials: hermes-agent/credentials
+
+# --- The security box ---
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: false
+    # Deny-all ingress: an ingress rule present flips Cilium to default-deny for
+    # ingress; this admits only a sentinel label nothing carries, so no pod can
+    # initiate to Hermes. (port-forward bypasses netpol via the kubelet.)
+    customRules:
+      - fromEndpoints:
+          - matchLabels:
+              io.cilium.k8s.policy.deny-sentinel: no-inbound
+  egress:
+    denyAll: true
+    allowDNS: false   # we supply L7 DNS below (required for toFQDNs resolution)
+    customRules:
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s:k8s-app: kube-dns
+        toPorts:
+          - ports:
+              - port: "53"
+                protocol: UDP
+              - port: "53"
+                protocol: TCP
+            rules:
+              dns:
+                - matchPattern: "*"
+      - toFQDNs:
+          - matchName: inference-api.nousresearch.com
+          - matchName: portal.nousresearch.com
+        toPorts:
+          - ports:
+              - port: "443"
+                protocol: TCP
