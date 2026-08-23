@@ -1,0 +1,5 @@
+namespace: vikunja
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../vikunja/values.yaml
