@@ -1,0 +1,42 @@
+# metrics-server - provides the resource metrics API.
+#
+# Without it `kubectl top` returns "Metrics API not available" and no HPA is
+# possible: only requests and capacity are observable, never actual usage --
+# which is precisely what you need when diagnosing memory pressure.
+
+args:
+  # Talos kubelets serve with a self-signed certificate unless
+  # `rotate-server-certificates` is enabled in the machine config, which this
+  # cluster does not currently set. Without that, metrics-server cannot verify
+  # the kubelet's serving cert and every scrape fails.
+  #
+  # This skips that verification. Traffic to the kubelet remains TLS, but the
+  # server is not authenticated. The stronger option is to enable kubelet
+  # serving-cert rotation on the Talos side and drop this flag; that is a
+  # machine-config change and so needs applying to every node.
+  - --kubelet-insecure-tls
+#
+# Deliberately NOT setting --kubelet-preferred-address-types: the chart already
+# defaults it to InternalIP,ExternalIP,Hostname, which is the order we want.
+# Restating it appended the flag a second time rather than replacing it.
+
+# Small footprint: this is a metrics API, not a time-series store. Long-term
+# retention is VictoriaMetrics' job.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 192Mi
+
+# Single replica. HA would need --enable-aggregator-routing on the apiserver
+# and offers little here: losing metrics-server briefly costs `kubectl top`,
+# not workloads.
+replicas: 1
+
+# Tolerate the control-plane taint so this can schedule anywhere, including
+# control planes that are otherwise reserved.
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
