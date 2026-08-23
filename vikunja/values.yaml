@@ -30,6 +30,12 @@ httproute:
   hostname: tasks.lan
   port: 3456
 
+# The image runs as UID 1000, but a freshly provisioned Longhorn volume mounts
+# root-owned, so the app cannot create its files directory. fsGroup makes the
+# mount group-writable and lets the kubelet chown it on attach.
+podSecurityContext:
+  fsGroup: 1000
+
 persistence:
   enabled: true
   mountPath: /data
