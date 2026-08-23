@@ -3,9 +3,11 @@
 
 fullnameOverride: frigate
 
+# Pinned to an explicit version rather than the moving "stable" tag, which
+# advances across minor releases without warning.
 image:
   repository: ghcr.io/blakeblackshear/frigate
-  tag: "stable"
+  tag: "0.16.4"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
