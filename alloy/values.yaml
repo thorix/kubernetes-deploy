@@ -93,3 +93,17 @@ alloy:
 
 controller:
   type: daemonset
+  # Run on tainted control planes too.
+  #
+  # Control planes that are not intended to carry workloads keep the
+  # node-role.kubernetes.io/control-plane:NoSchedule taint. Without a matching
+  # toleration the Alloy DaemonSet silently skips those nodes.
+  #
+  # That gap is easy to miss: a DaemonSet reports N/N Ready counting only
+  # *eligible* nodes, so partial coverage looks identical to full coverage.
+  # Collection must tolerate the taint, or tainting a node also stops observing
+  # it -- which is the opposite of what you want at the moment you taint it.
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
