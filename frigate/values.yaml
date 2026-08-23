@@ -7,13 +7,13 @@ fullnameOverride: frigate
 # advances across minor releases without warning.
 image:
   repository: ghcr.io/blakeblackshear/frigate
-  tag: "0.16.4"
+  tag: "0.17.2"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
 
 podAnnotations:
-  configmap-hash: "20260616-config-to-configrepo-retain60d"
+  configmap-hash: "20260823-frigate-0.17-tiered-record"
 
 # Use Recreate strategy - only one instance should access recordings PVC
 strategy:
