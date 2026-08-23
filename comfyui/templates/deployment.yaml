@@ -7,6 +7,20 @@ metadata:
     {{- include "comfyui.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate.
+  #
+  # This pod claims a GPU, and there is exactly one in the cluster. Under
+  # RollingUpdate the scheduler will not start the replacement until it can
+  # allocate a GPU, and the outgoing pod does not release its GPU until the
+  # replacement is Ready -- so any template change deadlocks. The same applies
+  # to the RWO volume this mounts.
+  #
+  # Observed: a rollout sat wedged for 181 days, the new ReplicaSet Pending on
+  # "Insufficient amd.com/gpu" while the old pod kept serving an outdated
+  # template. Recreate terminates first, then schedules, which is correct for a
+  # singleton-resource workload.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "comfyui.selectorLabels" . | nindent 6 }}
