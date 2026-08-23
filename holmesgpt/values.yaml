@@ -3,7 +3,10 @@
 # Uses local Ollama for LLM inference (no external API calls)
 
 logLevel: INFO
-replicas: 1
+# Scaled to 0 -- not yet providing enough value to justify the footprint, and
+# the operator was unstable under its configured memory limit. Set back to 1
+# to re-enable.
+replicas: 0
 
 # Disable telemetry
 sentryDSN: ""
@@ -108,8 +111,11 @@ mcpAddons:
     enabled: false
 
 # Holmes Operator - enables scheduled/automatic investigations
+# Disabled alongside replicas above: the operator repeatedly exceeded its
+# memory limit rather than reaching Ready. Re-enable both together, with a
+# larger limit than it had.
 operator:
-  enabled: true
+  enabled: false
   logLevel: INFO
   holmesApiTimeout: 300
   maxHistoryItems: 10
