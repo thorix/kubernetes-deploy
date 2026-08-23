@@ -34,16 +34,27 @@ spec:
           env:
             - name: HOMEPAGE_ALLOWED_HOSTS
               value: {{ .Values.hostname }}
+          # The probes must send a Host header the app accepts. Homepage validates
+          # Host against HOMEPAGE_ALLOWED_HOSTS and rejects anything else with a
+          # 400; a kubelet probe defaults to the pod IP, so without this the app
+          # fails its own health checks and CrashLoopBackOffs even though real
+          # traffic through the HTTPRoute is fine.
           livenessProbe:
             httpGet:
               path: /
               port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.hostname }}
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /
               port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.hostname }}
             initialDelaySeconds: 5
             periodSeconds: 5
           resources:
