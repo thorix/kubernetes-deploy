@@ -25,10 +25,11 @@ extraArgs:
 provider:
   name: webhook
   webhook:
+    # Pinned, never a floating tag.
     image:
       repository: ghcr.io/crutonjohn/external-dns-opnsense-webhook
-      tag: latest
-      pullPolicy: Always
+      tag: v1.0.0
+      pullPolicy: IfNotPresent
     env:
       - name: LOG_LEVEL
         value: info
