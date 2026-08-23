@@ -55,6 +55,14 @@ harbor:
 
   externalURL: https://harbor.lan
 
+  # Recreate, not RollingUpdate: the registry and jobservice Deployments mount
+  # ReadWriteOnce volumes. A rolling update starts the replacement pod while the
+  # old one still holds the disk, so the new pod blocks indefinitely on a
+  # Multi-Attach error and the rollout can never complete. Recreate stops the old
+  # pod first, trading a brief gap in service for a rollout that finishes.
+  updateStrategy:
+    type: Recreate
+
   persistence:
     enabled: true
     resourcePolicy: "keep"
