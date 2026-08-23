@@ -1,0 +1,84 @@
+# Vikunja — self-hosted task tracker.
+#
+# Single Go binary serving both the API and the web UI. SQLite rather than
+# Postgres: this is a single-user tracker, the whole dataset is small, and a
+# file on a persistent volume is one less stateful service to run and back up.
+# Switch to Postgres only if this ever grows real concurrent users.
+
+image:
+  repository: vikunja/vikunja
+  tag: "2.5.0"
+  pullPolicy: IfNotPresent
+
+containerPort: 3456
+
+# Recreate, not RollingUpdate: the data volume is ReadWriteOnce. A rolling
+# update would start the replacement pod while the old one still holds the
+# volume, so it would block forever on a Multi-Attach error.
+strategy:
+  type: Recreate
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 3456
+  targetPort: 3456
+
+httproute:
+  enabled: true
+  # Real hostname is environment-specific and lives in the private overlay.
+  hostname: tasks.lan
+  port: 3456
+
+persistence:
+  enabled: true
+  mountPath: /data
+  size: 10Gi
+  storageClass: longhorn
+  accessModes:
+    - ReadWriteOnce
+
+env:
+- name: VIKUNJA_DATABASE_TYPE
+  value: sqlite
+- name: VIKUNJA_DATABASE_PATH
+  value: /data/vikunja.db
+- name: VIKUNJA_FILES_BASEPATH
+  value: /data/files
+# Registration off: this is a single-operator instance reached through the
+# gateway, and an open signup form on a public hostname invites strangers in.
+- name: VIKUNJA_SERVICE_ENABLEREGISTRATION
+  value: "false"
+
+# VIKUNJA_SERVICE_SECRET signs JWTs. If it is unset Vikunja generates a random
+# one at every start, which silently invalidates every session on each restart.
+# It must therefore be a stable, externally supplied value.
+envFrom:
+- secretRef:
+    name: vikunja-service-secret
+
+probes:
+  enabled: true
+  liveness:
+    type: http
+    path: /api/v1/info
+    port: http
+    initialDelaySeconds: 20
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    type: http
+    path: /api/v1/info
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
