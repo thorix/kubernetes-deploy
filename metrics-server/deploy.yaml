@@ -1,0 +1,11 @@
+# metrics-server - resource metrics API (kubectl top, HPA)
+# https://github.com/kubernetes-sigs/metrics-server
+
+namespace: kube-system
+
+helm:
+- chart: metrics-server
+  repoURL: https://kubernetes-sigs.github.io/metrics-server/
+  targetRevision: "3.14.0"
+  valuesFiles:
+  - metrics-server/values.yaml
