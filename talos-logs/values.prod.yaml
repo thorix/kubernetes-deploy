@@ -1,0 +1,3 @@
+# Required by the ApplicationSet for external charts even when empty.
+# Environment-specific settings (node pinning, the LoadBalancer VIP) live in
+# the private config overlay at rye/talos-logs/values.yaml.

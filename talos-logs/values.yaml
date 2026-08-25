@@ -1,0 +1,98 @@
+# Talos remote log receiver.
+#
+# Why this exists: Talos keeps kernel and service logs in memory only. Anything
+# a node prints as it dies is gone the moment it reboots, which makes a node
+# that reboots on a cycle almost impossible to diagnose -- you have to be
+# attached with `talosctl dmesg --follow` at the moment it happens. Shipping the
+# logs off the box makes the cause visible after the fact instead.
+#
+# Talos needs TWO separate settings to feed this, which is easy to get wrong:
+#   - service logs: machine.logging.destinations
+#   - kernel logs:  a KmsgLogConfig document
+# The `talos.logging.kernel=` kernel argument does the same job, but
+# extraKernelArgs only take effect on upgrades, not on a config apply, so the
+# config document is the one to use.
+#
+# A SEPARATE Alloy release from the `alloy` DaemonSet on purpose. This one is a
+# single pinned replica: the receiver must never land on the node it is
+# collecting from, or the logs die with the machine. A DaemonSet cannot give
+# that guarantee, and the chart does not expose externalTrafficPolicy, so a
+# NodePort cannot pin locality either.
+#
+# Caveat: this receiver runs inside the cluster, so a cluster-wide outage still
+# loses logs. It covers node-level faults, not loss of the cluster itself --
+# console or IPMI access remains the backstop for that.
+
+alloy:
+  # otelcol.receiver.tcplog is an experimental component. Scoped to this
+  # dedicated instance; the shared alloy DaemonSet stays generally-available.
+  stabilityLevel: "experimental"
+
+  configMap:
+    content: |
+      // Talos sends newline-delimited JSON over TCP, one destination for kernel
+      // logs and one for service logs. Both land here.
+      otelcol.receiver.tcplog "talos" {
+        listen_address = "0.0.0.0:5170"
+
+        // Records the sending node's address, so a log line can be traced back
+        // to the machine that emitted it.
+        add_attributes = true
+
+        output {
+          logs = [otelcol.processor.attributes.talos.input]
+        }
+      }
+
+      // Loki derives its service_name label from service.name; without this,
+      // everything arrives as "unknown_service".
+      otelcol.processor.attributes "talos" {
+        action {
+          key    = "service.name"
+          value  = "talos"
+          action = "upsert"
+        }
+
+        output {
+          logs = [otelcol.processor.batch.talos.input]
+        }
+      }
+
+      otelcol.processor.batch "talos" {
+        output {
+          logs = [otelcol.exporter.otlphttp.loki.input]
+        }
+      }
+
+      // Loki 3.x ingests OTLP natively at /otlp/v1/logs, so this avoids the
+      // deprecated otelcol.exporter.loki. The exporter appends /v1/logs itself.
+      otelcol.exporter.otlphttp "loki" {
+        client {
+          endpoint = "http://loki.victoriametrics.svc:3100/otlp"
+        }
+      }
+
+  extraPorts:
+    - name: talos-logs
+      port: 5170
+      targetPort: 5170
+      protocol: TCP
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+controller:
+  type: deployment
+  replicas: 1
+
+# The shared alloy release already runs a node-scoped collector; this one needs
+# no Kubernetes discovery at all.
+rbac:
+  create: false
+
+serviceMonitor:
+  enabled: false
