@@ -1,0 +1,12 @@
+# talos-logs — receives Talos kernel and service logs and forwards them to Loki.
+#
+# Deployed into the victoriametrics namespace (same as alloy and loki) rather
+# than one named after this directory, so the whole logging path lives together.
+namespace: victoriametrics
+
+helm:
+- chart: alloy
+  repoURL: https://grafana.github.io/helm-charts
+  targetRevision: "1.8.2"
+  valuesFiles:
+  - talos-logs/values.yaml
