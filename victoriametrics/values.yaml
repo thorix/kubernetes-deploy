@@ -151,6 +151,51 @@ server:
         - target_label: __address__
           replacement: blackbox-exporter-prometheus-blackbox-exporter:9115
 
+      # 10G switch over SNMPv3, via snmp_exporter's multi-target /snmp endpoint.
+      # Real target lives in the private config overlay; empty here.
+      #
+      # Split into two jobs because the modules cost very different amounts to
+      # walk -- if_mib measured 11.6s and tplink_ddm 7.3s against this switch --
+      # and one module per request is how snmp_exporter's ?module= works anyway.
+      # Both run at 60s rather than the 30s global default: an SNMP walk is slow
+      # and serial, and polling faster than the walk takes would just queue.
+      # scrape_timeout is well above the measured walk so a slow response is
+      # reported as a value, not silently lost to a timeout.
+      - job_name: snmp-switch-if
+        metrics_path: /snmp
+        scrape_interval: 60s
+        scrape_timeout: 30s
+        params:
+          auth: [switch_v3]
+          module: [if_mib]
+        static_configs:
+        - targets: []
+        relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: snmp-exporter-simple-service.snmp-exporter.svc:9116
+
+      # SFP+ transceiver diagnostics (temperature, voltage, bias, optical power).
+      - job_name: snmp-switch-ddm
+        metrics_path: /snmp
+        scrape_interval: 60s
+        scrape_timeout: 30s
+        params:
+          auth: [switch_v3]
+          module: [tplink_ddm]
+        static_configs:
+        - targets: []
+        relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: snmp-exporter-simple-service.snmp-exporter.svc:9116
+
 extraObjects:
   # Non-headless service for Gateway API routing (chart's server service is headless)
   - apiVersion: v1

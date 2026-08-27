@@ -1,0 +1,6 @@
+namespace: snmp-exporter
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../snmp-exporter/values.yaml
