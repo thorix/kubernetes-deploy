@@ -5,15 +5,35 @@
 # data that is cheaper to rebuild than to replicate, we instead want a single
 # replica that is guaranteed local.
 #
-# strict-local requires numberOfReplicas: 1, and Longhorn requires
-# WaitForFirstConsumer so the replica is created on whichever node the
-# consuming pod is scheduled to. More than one node may carry disks tagged
-# "ssd", so a consumer that cares which node it lands on must pin itself with
-# a nodeSelector rather than relying on diskSelector alone.
+# Two replicas with best-effort locality, not strict-local. strict-local caps a
+# volume at one replica, which makes the owning node a single point of failure
+# for the workload: the pod can only run where that replica lives. best-effort
+# still places a replica on the consuming pod's node, but the second replica
+# means the workload survives losing a node. The cost is real -- with two
+# replicas the engine serves reads from either one, so roughly half cross the
+# network; measured at ~2-3x higher cold-read latency than strict-local.
+#
+# WaitForFirstConsumer so the first replica lands on the consuming pod's node.
+# More than one node may carry disks tagged "ssd", so diskSelector alone does
+# not determine placement.
+#
+# recurringJobSelector opts volumes out of the "default" recurring-job group.
+# Longhorn auto-enrols volumes with no recurring-job labels into "default",
+# which here means a nightly snapshot and a backup to S3. For regenerable
+# derived data that is wasted storage and egress, so we point at a group no
+# job targets.
+#
+# The name is kept for compatibility: storageClassName is immutable on a bound
+# PVC, so renaming would require recreating every volume using this class.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: longhorn-local-ssd
+  annotations:
+    # StorageClass.parameters is immutable, so an in-place patch is rejected.
+    # Replace lets Argo delete and recreate the class on parameter changes.
+    # Safe: deleting a StorageClass does not affect already-bound PVs or PVCs.
+    argocd.argoproj.io/sync-options: Replace=true
   labels:
     {{- include "longhorn.labels" . | nindent 4 }}
 provisioner: driver.longhorn.io
@@ -21,8 +41,9 @@ allowVolumeExpansion: true
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 parameters:
-  numberOfReplicas: "1"
-  dataLocality: "strict-local"
+  numberOfReplicas: "2"
+  dataLocality: "best-effort"
+  recurringJobSelector: '[{"name":"no-backup","isGroup":true}]'
   diskSelector: "ssd"
   staleReplicaTimeout: "30"
   fsType: "ext4"
