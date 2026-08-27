@@ -1,0 +1,222 @@
+# snmp_exporter — polls the 10G switch over SNMPv3 and exposes it at /snmp.
+#
+# This is a multi-target exporter: it holds no target list of its own. The
+# switch address is supplied per-scrape by VictoriaMetrics via ?target=,
+# which is why nothing environment-specific lives in this file (the real
+# address is in the private config repo, in the victoriametrics overlay).
+#
+# The image already ships a 1.9 MB generated /etc/snmp_exporter/snmp.yml
+# containing every standard module, if_mib included. Rather than vendor a
+# copy of that here, we keep it and layer two small extra config files on
+# top -- --config.file is repeatable and snmp_exporter merges the results.
+# That means module definitions stay upstream-maintained and this file only
+# carries what is genuinely ours: the v3 credentials and the TP-Link DDM
+# module. To add another module later, append a file here and a walk/metrics
+# block below; nothing else has to change.
+
+image:
+  repository: prom/snmp-exporter
+  tag: "v0.30.1"
+
+containerPort: 9116
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 9116
+  targetPort: 9116
+
+# The image's CMD only loads the shipped snmp.yml, so it must be restated
+# here along with our overlay files. --config.expand-environment-variables
+# is what makes the ${SNMP_*} references in auth.yml resolve; without it the
+# credentials are read as literal strings and every v3 scrape fails.
+args:
+- --config.file=/etc/snmp_exporter/snmp.yml
+- --config.file=/etc/snmp_exporter/custom/auth.yml
+- --config.file=/etc/snmp_exporter/custom/ddm.yml
+- --config.expand-environment-variables
+
+# Pre-existing secret (namespace snmp-exporter). Holds SNMP_USER,
+# SNMP_AUTH_PASSWORD and SNMP_PRIV_PASSWORD; not managed by this chart.
+envFrom:
+- secretRef:
+    name: snmp-switch10g
+
+# Mounted at a subdirectory so it layers alongside the image's snmp.yml
+# instead of shadowing the directory that contains it.
+configMap:
+  enabled: true
+  mountPath: /etc/snmp_exporter/custom
+  files:
+    auth.yml: |
+      # SNMPv3 authPriv. DES is weak, but it is what the switch's SNMP
+      # engine offers alongside SHA, and the traffic is confined to the
+      # management VLAN. Values are expanded from the secret at startup.
+      auths:
+        switch_v3:
+          version: 3
+          username: ${SNMP_USER}
+          security_level: authPriv
+          auth_protocol: SHA
+          password: ${SNMP_AUTH_PASSWORD}
+          priv_protocol: DES
+          priv_password: ${SNMP_PRIV_PASSWORD}
+
+    ddm.yml: |
+      # TP-Link private DDM (digital diagnostic monitoring) for the SFP+ cages.
+      # ENTITY-SENSOR-MIB is not implemented on this switch, so this vendor
+      # table is the only source of transceiver temperature.
+      #
+      # 1.3.6.1.4.1.11863.6.96.1.7.1.1.<col>.<ifIndex> -- live readings, indexed
+      # by ifIndex, populated only for the four SFP+ ports. Columns:
+      #   1 port name   2 temperature (C)   3 voltage (V)   4 bias (mA)
+      #   5 TX power (mW)   6 RX power (mW)   7-9 alarm flags
+      # Columns 7-9 are deliberately omitted: they are True/False strings whose
+      # individual meanings were never pinned down, and comparing the live
+      # readings against the threshold columns below yields the same answer
+      # without guessing at a label.
+      #
+      # Every value is an OCTET STRING carrying a decimal ("70.675781"), not a
+      # numeric type. Two consequences drove the config below:
+      #   * type: Float does NOT parse these -- it was measured returning 0 for
+      #     a reading of 70.67. regex_extracts is the mechanism that works.
+      #   * unpopulated cages and absent thresholds return the string "N/A".
+      #     The anchored numeric regex simply fails to match those, so the
+      #     sample is omitted rather than reported as a false 0. This was
+      #     confirmed against live "N/A" values in the threshold table.
+      # Units are already engineering units, so no scaling is applied. Note
+      # that a `scale:` field is not honoured by this version -- it parses
+      # without complaint and silently does nothing, so it is not used here.
+      modules:
+        tplink_ddm:
+          walk:
+          - 1.3.6.1.4.1.11863.6.96.1.7.1.1
+          - 1.3.6.1.4.1.11863.6.96.1.2.1.1
+          - 1.3.6.1.2.1.31.1.1.1.1
+          - 1.3.6.1.2.1.31.1.1.1.18
+          metrics:
+          # ifName/ifAlias are looked up from IF-MIB so these samples carry the
+          # same port labels as the if_mib module's counters and can be joined
+          # against them in a query.
+          - name: tplink_sfp_temperature_celsius
+            oid: 1.3.6.1.4.1.11863.6.96.1.7.1.1.2
+            type: DisplayString
+            help: SFP+ transceiver temperature in Celsius (TP-Link DDM)
+            regex_extracts: &ddm_number
+              "":
+              - regex: "^(-?[0-9]+(?:[.][0-9]+)?)$"
+                value: "$1"
+            indexes: &ddm_index
+            - labelname: ifIndex
+              type: gauge
+            lookups: &ddm_lookups
+            - labels: [ifIndex]
+              labelname: ifName
+              oid: 1.3.6.1.2.1.31.1.1.1.1
+              type: DisplayString
+            - labels: [ifIndex]
+              labelname: ifAlias
+              oid: 1.3.6.1.2.1.31.1.1.1.18
+              type: DisplayString
+
+          - name: tplink_sfp_voltage_volts
+            oid: 1.3.6.1.4.1.11863.6.96.1.7.1.1.3
+            type: DisplayString
+            help: SFP+ transceiver supply voltage in volts (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+          - name: tplink_sfp_bias_current_milliamps
+            oid: 1.3.6.1.4.1.11863.6.96.1.7.1.1.4
+            type: DisplayString
+            help: SFP+ transceiver laser bias current in milliamps (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+          # Milliwatts, not the dBm the switch CLI prints. Confirmed by the
+          # threshold table: the TX high/low alarms read 2.51 and 0.13, i.e.
+          # +4.0 and -9.0 dBm, which are ordinary SFP+ limits only if the
+          # unit is mW. Use 10*log10() in a query if dBm is wanted.
+          - name: tplink_sfp_tx_power_milliwatts
+            oid: 1.3.6.1.4.1.11863.6.96.1.7.1.1.5
+            type: DisplayString
+            help: SFP+ transceiver TX optical power in milliwatts (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+          - name: tplink_sfp_rx_power_milliwatts
+            oid: 1.3.6.1.4.1.11863.6.96.1.7.1.1.6
+            type: DisplayString
+            help: SFP+ transceiver RX optical power in milliwatts (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+          # Per-transceiver temperature limits, read from the module's own
+          # EEPROM, so they differ per cage (95C alarm on one, 80C on another).
+          # Exported so an alert can compare against the real limit rather than
+          # a hardcoded number. Only the temperature thresholds are walked --
+          # the voltage/bias/power threshold tables would each add another walk
+          # to an already slow scrape for no current use.
+          - name: tplink_sfp_temperature_high_alarm_celsius
+            oid: 1.3.6.1.4.1.11863.6.96.1.2.1.1.2
+            type: DisplayString
+            help: SFP+ transceiver temperature high-alarm threshold in Celsius (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+          - name: tplink_sfp_temperature_high_warning_celsius
+            oid: 1.3.6.1.4.1.11863.6.96.1.2.1.1.4
+            type: DisplayString
+            help: SFP+ transceiver temperature high-warning threshold in Celsius (TP-Link DDM)
+            regex_extracts: *ddm_number
+            indexes: *ddm_index
+            lookups: *ddm_lookups
+
+# Scrapes the exporter's own process/health metrics. The switch metrics are
+# NOT collected this way -- /snmp needs a ?target= and is driven by the
+# dedicated jobs in the victoriametrics values.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9116"
+  prometheus.io/path: "/metrics"
+
+probes:
+  enabled: true
+  liveness:
+    path: /-/healthy
+    port: 9116
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /-/healthy
+    port: 9116
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Measured at 42Mi resident with the full shipped snmp.yml parsed; the limit
+# leaves room for the allocations a concurrent walk makes.
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 192Mi
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  seccompProfile:
+    type: RuntimeDefault
