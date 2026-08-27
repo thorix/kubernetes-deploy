@@ -230,6 +230,100 @@ server:
           annotations:
             summary: "ArgoCD app {{ $labels.name }} sync status Unknown for 15m"
 
+      # Disk health for hosts that sit outside the cluster and so are not covered
+      # by the kubernetes-nodes job: SMART attributes and ZFS pool errors,
+      # collected by smartctl_exporter and a zpool textfile exporter.
+      #
+      # Design note, and the whole reason these rules look the way they do: SMART
+      # raw values are CUMULATIVE lifetime counters that never reset. Any disk
+      # with history will show a non-zero total, so an absolute threshold tends
+      # to fire on deployment and never clear. The counter alerts below therefore
+      # fire on the DELTA — a disk actively getting worse — not on the total.
+      # A static count may be years old and harmless; a rising one is not.
+      #
+      # State alerts (pool not ONLINE, SMART self-assessment failed, permanent
+      # data errors) DO fire on absolute state, because those need attention
+      # regardless of when they started.
+      #
+      # Deliberately NOT alerting on smartctl_device_percentage_used: some SSD
+      # firmware reports wear figures that disagree wildly with actual bytes
+      # written, which would make that field a permanent false alarm. Available
+      # spare and media errors are the trustworthy NVMe signals.
+      - name: disk-health
+        rules:
+        - alert: SmartCounterIncreasing
+          expr: increase(smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Reallocated_Sector_Ct|Current_Pending_Sector|Offline_Uncorrectable|Reported_Uncorrect"}[24h]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SMART {{ $labels.attribute_name }} rising on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Up by {{ $value }} in 24h. A growing count means the disk is degrading now; a static count may be years old and harmless."
+        - alert: SmartCrcErrorsIncreasing
+          expr: increase(smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"}[24h]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SMART CRC errors rising on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Up by {{ $value }} in 24h. CRC errors point at the cable or connection, not the platter — reseat before replacing the disk."
+        - alert: SmartHealthFailed
+          expr: smartctl_device_smart_status == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "SMART self-assessment FAILED on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Drive reports overall-health FAILED. Confirm it is genuine wear and not a firmware reporting bug before replacing."
+        - alert: NvmeAvailableSpareLow
+          expr: smartctl_device_available_spare <= smartctl_device_available_spare_threshold
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "NVMe spare capacity exhausted on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Available spare has fallen to its threshold. Unlike percentage-used, this reflects real remapping and is not affected by firmware wear-reporting quirks."
+        - alert: NvmeMediaErrorsIncreasing
+          expr: increase(smartctl_device_media_errors[24h]) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "NVMe media errors rising on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Up by {{ $value }} in 24h. Unrecoverable data integrity errors — back up before doing anything else."
+        - alert: ZpoolNotOnline
+          expr: zpool_state{state="ONLINE"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ZFS pool {{ $labels.pool }} on {{ $labels.instance }} is not ONLINE"
+            description: "Pool has lost a device or is otherwise degraded. On a raidz1 pool this means zero remaining parity — a second failure loses the pool."
+        - alert: ZpoolDataErrors
+          expr: zpool_data_errors > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ZFS pool {{ $labels.pool }} on {{ $labels.instance }} reports {{ $value }} permanent data errors"
+            description: "Files are unrecoverable from parity. Run 'zpool status -v' to list them, restore from backup, then 'zpool clear'."
+        - alert: ZpoolVdevErrorsIncreasing
+          expr: increase(zpool_vdev_errors_total[24h]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ZFS {{ $labels.type }} errors rising on {{ $labels.pool }} vdev {{ $labels.vdev }}"
+            description: "Up by {{ $value }} in 24h on {{ $labels.instance }}. Note these counters reset on 'zpool clear' and on import, so this is since the last clear."
+        - alert: DiskMetricsExporterDown
+          expr: up{job=~".*-(smart|zpool)"} == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk metrics exporter {{ $labels.job }} is down"
+            description: "No SMART or ZFS data is being collected from {{ $labels.instance }}, so disk degradation would go unnoticed."
+
 alertmanager:
   enabled: true
   resources:
