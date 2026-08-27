@@ -21,6 +21,15 @@ logFormat: text
 extraArgs:
   - --crd-source-apiversion=externaldns.k8s.io/v1alpha1
   - --crd-source-kind=DNSEndpoint
+  # Pin the annotation prefix rather than inheriting the upstream default.
+  # external-dns is switching its default from external-dns.alpha.kubernetes.io/
+  # to external-dns.kubernetes.io/ (kubernetes-sigs/external-dns#6424, in app
+  # v0.22.0). On a release that flips the default, any annotation still written
+  # with the old prefix silently stops being seen as a source — and with
+  # `policy: sync` above, records whose source disappears are DELETED, not left
+  # alone. Setting this explicitly makes the upgrade a no-op either way.
+  # No annotations currently use it; this keeps it that way by choice, not luck.
+  - --annotation-prefix=external-dns.alpha.kubernetes.io/
 
 provider:
   name: webhook
