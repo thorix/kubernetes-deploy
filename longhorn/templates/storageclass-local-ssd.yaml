@@ -1,0 +1,30 @@
+# StorageClass for latency-sensitive, regenerable data.
+#
+# The default `longhorn` class sets dataLocality: disabled and 3 replicas, so
+# reads may be served from a replica on another node. For caches and derived
+# data that is cheaper to rebuild than to replicate, we instead want a single
+# replica that is guaranteed local.
+#
+# strict-local requires numberOfReplicas: 1, and Longhorn requires
+# WaitForFirstConsumer so the replica is created on whichever node the
+# consuming pod is scheduled to. More than one node may carry disks tagged
+# "ssd", so a consumer that cares which node it lands on must pin itself with
+# a nodeSelector rather than relying on diskSelector alone.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-local-ssd
+  labels:
+    {{- include "longhorn.labels" . | nindent 4 }}
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: "strict-local"
+  diskSelector: "ssd"
+  staleReplicaTimeout: "30"
+  fsType: "ext4"
+  dataEngine: "v1"
+  unmapMarkSnapChainRemoved: "ignored"
