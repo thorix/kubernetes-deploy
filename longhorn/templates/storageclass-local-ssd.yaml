@@ -30,10 +30,13 @@ kind: StorageClass
 metadata:
   name: longhorn-local-ssd
   annotations:
-    # StorageClass.parameters is immutable, so an in-place patch is rejected.
-    # Replace lets Argo delete and recreate the class on parameter changes.
-    # Safe: deleting a StorageClass does not affect already-bound PVs or PVCs.
-    argocd.argoproj.io/sync-options: Replace=true
+    # StorageClass.parameters is immutable. Replace=true alone is not enough --
+    # it maps to `kubectl replace`, which the API still rejects on an immutable
+    # field. Force=true makes it `kubectl replace --force`, i.e. delete and
+    # recreate, which is the only way to change these parameters.
+    # Safe: deleting a StorageClass does not affect already-bound PVs or PVCs;
+    # binding is recorded on the PV, not resolved through the class at runtime.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
   labels:
     {{- include "longhorn.labels" . | nindent 4 }}
 provisioner: driver.longhorn.io
