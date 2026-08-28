@@ -73,9 +73,35 @@ resources:
   limits:
     memory: 8Gi
 
+# /config must PERSIST, not just be writable.
+#
+# Frigate keeps its recordings database at /config/frigate.db, and its retention
+# cleanup only deletes segments it has rows for. When /config was an emptyDir,
+# every pod restart wiped that database, so all recordings made before the
+# restart became orphans Frigate would never delete again -- retention silently
+# stopped applying to them while continuing to work for anything newer.
+#
+# The symptom is quiet: retention keeps working for anything recorded since
+# the last restart, while everything older is abandoned in place. It surfaces
+# as intact day-directories well past the policy window, mixed with small
+# remnants from cleanups that died part-way through.
+#
+# A PVC rather than a hostPath because the database is SQLite: it must not live
+# on the SMB recordings share, where CIFS locking would corrupt it.
+#
+# The initContainer still copies config.yml from the ConfigMap into /config on
+# every start, so the rendered config stays authoritative and the PVC only
+# carries state Frigate owns (database, model cache).
+persistence:
+  enabled: true
+  mountPath: /config
+  size: 5Gi
+  storageClass: longhorn
+  accessModes:
+    - ReadWriteOnce
+
 # ConfigMap for frigate config.yml (injected via fileParameters in deploy.yaml)
-# Mounted to /config-ro (read-only) and copied to /config by initContainer
-# because Frigate needs a writable /config for model cache and config migration
+# Mounted to /config-ro (read-only) and copied into /config by the initContainer
 configMap:
   enabled: true
   mountPath: /config-ro
@@ -89,7 +115,7 @@ initContainers:
   - name: config
     mountPath: /config-ro
     readOnly: true
-  - name: config-rw
+  - name: data
     mountPath: /config
 
 # Environment variables
@@ -129,8 +155,6 @@ persistentVolumes:
 
 # Additional volumes
 volumes:
-- name: config-rw
-  emptyDir: {}
 - name: cache
   emptyDir:
     medium: Memory
@@ -147,8 +171,6 @@ volumes:
 volumeMounts:
 - name: recordings
   mountPath: /media/frigate
-- name: config-rw
-  mountPath: /config
 - name: cache
   mountPath: /tmp/cache
 - name: shm
