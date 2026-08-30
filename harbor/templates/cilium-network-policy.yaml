@@ -104,6 +104,14 @@ spec:
       app: harbor
       component: core
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From nginx (reverse proxy)
     - fromEndpoints:
         - matchLabels:
@@ -213,6 +221,14 @@ spec:
       app: harbor
       component: portal
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From nginx only
     - fromEndpoints:
         - matchLabels:
@@ -239,6 +255,14 @@ spec:
       app: harbor
       component: registry
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From core (image operations, registryctl)
     - fromEndpoints:
         - matchLabels:
@@ -307,6 +331,14 @@ spec:
       app: harbor
       component: jobservice
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From core (job dispatch)
     - fromEndpoints:
         - matchLabels:
@@ -389,6 +421,14 @@ spec:
       app: harbor
       component: database
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From core
     - fromEndpoints:
         - matchLabels:
@@ -424,6 +464,14 @@ spec:
       app: harbor
       component: redis
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From core, jobservice, registry
     - fromEndpoints:
         - matchLabels:
@@ -466,6 +514,14 @@ spec:
       app: harbor
       component: trivy
   ingress:
+    # kubelet liveness/readiness probes originate from the NODE, not from a pod,
+    # so they match no fromEndpoints rule and are dropped -- the symptom is an
+    # "i/o timeout" probe failure against a process that is listening fine.
+    # Without this every probed component here fails readiness, never enters its
+    # Service endpoints, and the whole of Harbor fails to start.
+    - fromEntities:
+        - host
+        - remote-node
     # From core (scan requests)
     - fromEndpoints:
         - matchLabels:
