@@ -229,11 +229,15 @@ spec:
     - fromEntities:
         - host
         - remote-node
-    # From nginx only
+    # From nginx (proxying) and core (health check). Core was missing, which made
+    # portal report "unhealthy" in /api/v2.0/health.
     - fromEndpoints:
         - matchLabels:
             app: harbor
             component: nginx
+        - matchLabels:
+            app: harbor
+            component: core
       toPorts:
         - ports:
             - port: "8080"
@@ -493,6 +497,17 @@ spec:
         - matchLabels:
             app: harbor
             component: registry
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # Trivy uses redis as its job queue but was never allowed. The result was
+    # redis reporting "unhealthy" in /api/v2.0/health even though the redis pod
+    # itself was Running and Ready.
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: trivy
       toPorts:
         - ports:
             - port: "6379"
