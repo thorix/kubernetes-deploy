@@ -187,6 +187,17 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # core → portal. Core health-checks the portal, so without this egress rule
+    # /api/v2.0/health reports portal "unhealthy" while the UI itself works fine
+    # (nginx reaches portal directly and is unaffected).
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: portal
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # core → internet (proxy cache upstream pulls)
     - toEntities:
         - world
