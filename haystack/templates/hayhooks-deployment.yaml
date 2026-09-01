@@ -8,6 +8,12 @@ metadata:
 spec:
   replicas: {{ .Values.hayhooks.replicas }}
   revisionHistoryLimit: 3
+  # The repos PVC is RWO. RollingUpdate keeps the old pod (and its volume
+  # attachment) alive while the new one starts, so a replacement scheduled to a
+  # different node deadlocks on a Multi-Attach error. Recreate frees the volume
+  # before the new pod is created.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "haystack.hayhooksSelectorLabels" . | nindent 6 }}
