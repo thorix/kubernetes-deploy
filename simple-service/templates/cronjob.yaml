@@ -11,6 +11,11 @@ metadata:
     {{- include "simple-service.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.cronjob.schedule | quote }}
+  {{- if .Values.cronjob.suspend }}
+  # Set cronjob.suspend to stop a job from firing without deleting it, so the
+  # schedule, history and config stay visible instead of silently disappearing.
+  suspend: true
+  {{- end }}
   {{- with .Values.cronjob.timeZone }}
   timeZone: {{ . | quote }}
   {{- end }}
