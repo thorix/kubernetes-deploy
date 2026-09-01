@@ -5,12 +5,25 @@ hayhooks:
   image: deepset/hayhooks:v1.17.0
   replicas: 1
 
-  # Must match the haystack-ai version bundled in the image above.
-  # PYTHONPATH=/opt/extra-packages shadows the image's own site-packages, so an
-  # unpinned install of haystack-ai silently upgrades it and breaks hayhooks:
+  # Pipeline dependencies are pip-installed at pod start into /opt/extra-packages,
+  # which PYTHONPATH puts ahead of the image's own site-packages. Every one of
+  # these must be pinned: an unpinned install silently picks up new major
+  # versions and breaks hayhooks at runtime. Re-verify these when bumping the
+  # image tag above.
+
+  # Must match the haystack-ai version bundled in the image.
   # haystack-ai 3.x removed haystack.AsyncPipeline, which hayhooks v1.17.0 imports.
-  # Bump this together with the image tag.
   haystackVersion: "2.27.0"
+
+  # milvus-haystack builds a MilvusClient and then reuses client._using as an ORM
+  # connection alias. pymilvus 2.6+ decoupled MilvusClient from the ORM connection
+  # registry, so that alias is unregistered and every pipeline's setup() fails with
+  # ConnectionNotExistException. 2.5.x still registers it.
+  pymilvusVersion: "2.5.14"
+
+  # hayhooks declares mcp>=1.8.0 with no upper bound. mcp 2.x removed
+  # Server.list_tools, which breaks `hayhooks mcp run` (the port 1417 server).
+  mcpConstraint: "<2"
 
   # Resource limits
   resources:
