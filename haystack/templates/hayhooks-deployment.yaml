@@ -31,7 +31,7 @@ spec:
           set -e
           echo "Installing pipeline dependencies..."
           pip install --no-cache-dir --target=/opt/extra-packages \
-            haystack-ai milvus-haystack ollama-haystack nltk mcp
+            haystack-ai=={{ .Values.hayhooks.haystackVersion }} milvus-haystack ollama-haystack nltk mcp
           echo "Downloading NLTK data..."
           PYTHONPATH=/opt/extra-packages python -c "import nltk; nltk.download('punkt_tab', quiet=True, download_dir='/opt/extra-packages/nltk_data')"
           echo "Dependencies installed successfully"

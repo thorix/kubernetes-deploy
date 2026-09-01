@@ -5,6 +5,13 @@ hayhooks:
   image: deepset/hayhooks:v1.17.0
   replicas: 1
 
+  # Must match the haystack-ai version bundled in the image above.
+  # PYTHONPATH=/opt/extra-packages shadows the image's own site-packages, so an
+  # unpinned install of haystack-ai silently upgrades it and breaks hayhooks:
+  # haystack-ai 3.x removed haystack.AsyncPipeline, which hayhooks v1.17.0 imports.
+  # Bump this together with the image tag.
+  haystackVersion: "2.27.0"
+
   # Resource limits
   resources:
     requests:
