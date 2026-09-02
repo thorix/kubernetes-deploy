@@ -8,7 +8,7 @@ nameOverride: frontend
 
 image:
   repository: codewithcj/sparkyfitness
-  tag: "v0.17.0"
+  tag: "v0.17.3"
 
 containerPort: 80
 
