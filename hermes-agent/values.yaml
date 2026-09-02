@@ -38,6 +38,19 @@ env:
   # Restrict the bot to the single channel it delivers to (tightening).
   - name: SLACK_ALLOWED_CHANNELS
     value: "weekly-digest"
+  # Model provider: Hermes's `openrouter` provider, pointed at Nous Portal's
+  # OpenAI-compatible inference endpoint (the key works as a plain bearer;
+  # chat completions verified 200). Without OPENROUTER_BASE_URL the provider
+  # calls openrouter.ai, which the egress jail correctly drops → timeout.
+  - name: OPENROUTER_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-credentials
+        key: NOUS_API_KEY
+  - name: OPENROUTER_BASE_URL
+    value: "https://inference-api.nousresearch.com/v1"  # hygiene:allow
+  - name: OPENROUTER_MODEL
+    value: "anthropic/claude-sonnet-4.5"
 
 # Phase 0: no inbound. Access is `kubectl port-forward` only.
 service:
