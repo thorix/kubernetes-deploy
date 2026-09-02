@@ -28,6 +28,13 @@ env:
       secretKeyRef:
         name: hermes-agent-simple-service-slack
         key: SLACK_BOT_TOKEN
+  # App-level token — Hermes's Slack integration uses Socket Mode (a WSS
+  # connection), which requires this in addition to the bot token.
+  - name: SLACK_APP_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-slack
+        key: SLACK_APP_TOKEN
   # Restrict the bot to the single channel it delivers to (tightening).
   - name: SLACK_ALLOWED_CHANNELS
     value: "weekly-digest"
@@ -145,6 +152,9 @@ networkPolicy:
           # which restates this whole egress list with the feed hosts added.
           - matchName: slack.com
           - matchName: api.slack.com
+          # Socket Mode opens a WSS connection to these hosts.
+          - matchName: wss-primary.slack.com
+          - matchName: wss-backup.slack.com
         toPorts:
           - ports:
               - port: "443"
