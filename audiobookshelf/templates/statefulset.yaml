@@ -43,12 +43,19 @@ spec:
         - name: config-metadata
           subPath: metadata
           mountPath: /metadata
+        # subPaths are relative to the SMB share root, so the library layout on
+        # the NAS is env-specific and lives in the private overlay. readOnly is
+        # safe by default: Audiobookshelf keeps its database, metadata and cached
+        # covers on the config-metadata volume, and only writes into the library
+        # if "store metadata/cover with item" is enabled in server settings.
         - name: data
-          subPath: audiobooks
+          subPath: {{ .Values.smb.media.audiobooksSubPath | default "audiobooks" }}
           mountPath: /audiobooks
+          readOnly: {{ .Values.smb.media.readOnly | default false }}
         - name: data
-          subPath: podcasts
+          subPath: {{ .Values.smb.media.podcastsSubPath | default "podcasts" }}
           mountPath: /podcasts
+          readOnly: {{ .Values.smb.media.readOnly | default false }}
       volumes:
       - name: data
         persistentVolumeClaim:

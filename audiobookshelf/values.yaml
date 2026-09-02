@@ -46,6 +46,13 @@ smb:
     source: "//nas.lan/media"
     subDir: audio.books
     capacity: 1Ti
+    # Directories inside the mounted share root.
+    audiobooksSubPath: audiobooks
+    podcastsSubPath: podcasts
+    # Mount the library read-only. Set false only if you enable "store
+    # metadata with item" / "store cover with item", which make Audiobookshelf
+    # write back into the library folders.
+    readOnly: false
 
 # Vault configuration
 vault:
