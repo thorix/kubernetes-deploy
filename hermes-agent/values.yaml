@@ -23,6 +23,14 @@ env:
       secretKeyRef:
         name: hermes-agent-simple-service-credentials
         key: NOUS_API_KEY
+  - name: SLACK_BOT_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-slack
+        key: SLACK_BOT_TOKEN
+  # Restrict the bot to the single channel it delivers to (tightening).
+  - name: SLACK_ALLOWED_CHANNELS
+    value: "weekly-digest"
 
 # Phase 0: no inbound. Access is `kubectl port-forward` only.
 service:
@@ -98,6 +106,7 @@ vault:
     serviceAccount: hermes-agent
   secrets:
     credentials: hermes-agent/credentials
+    slack: hermes-agent/slack
 
 # --- The security box ---
 networkPolicy:
@@ -131,6 +140,11 @@ networkPolicy:
       - toFQDNs:
           - matchName: inference-api.nousresearch.com
           - matchName: portal.nousresearch.com
+          # Slack delivery (generic). Location-revealing news-feed egress lives
+          # ONLY in the private overlay (kubernetes-config/rye/hermes-agent),
+          # which restates this whole egress list with the feed hosts added.
+          - matchName: slack.com
+          - matchName: api.slack.com
         toPorts:
           - ports:
               - port: "443"
