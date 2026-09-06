@@ -5,6 +5,10 @@
 # kubernetes-deploy-docs/docs/superpowers/specs/2026-09-06-news-digest-service-design.md
 workloadType: Deployment
 replicaCount: 1
+# Recreate (not rolling) — the cursor PVC is ReadWriteOnce, so the old pod must
+# release it before the new one can attach (else rollouts Multi-Attach deadlock).
+strategy:
+  type: Recreate
 
 image:
   repository: harbor.thorix.io/library/news-digest
