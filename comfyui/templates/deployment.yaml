@@ -72,8 +72,12 @@ spec:
           failureThreshold: 3
         resources:
           requests:
-            cpu: {{ .Values.resources.requests.cpu }}
-            memory: {{ .Values.resources.requests.memory }}
+            {{- with .Values.resources.requests.cpu }}
+            cpu: {{ . }}
+            {{- end }}
+            {{- with .Values.resources.requests.memory }}
+            memory: {{ . }}
+            {{- end }}
             {{- if .Values.gpu.enabled }}
             {{- if eq .Values.gpu.type "nvidia" }}
             nvidia.com/gpu: {{ .Values.gpu.count }}
@@ -82,8 +86,12 @@ spec:
             {{- end }}
             {{- end }}
           limits:
-            cpu: {{ .Values.resources.limits.cpu }}
-            memory: {{ .Values.resources.limits.memory }}
+            {{- with .Values.resources.limits.cpu }}
+            cpu: {{ . }}
+            {{- end }}
+            {{- with .Values.resources.limits.memory }}
+            memory: {{ . }}
+            {{- end }}
             {{- if .Values.gpu.enabled }}
             {{- if eq .Values.gpu.type "nvidia" }}
             nvidia.com/gpu: {{ .Values.gpu.count }}
