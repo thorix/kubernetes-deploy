@@ -58,6 +58,19 @@ argocd:
     cm:
       accounts.claude: apiKey
       accounts.claude.enabled: "true"
+      # Server-side diff: ArgoCD asks the API server for a server-side apply
+      # dry-run and diffs against that, instead of comparing to
+      # last-applied-configuration.
+      #
+      # Without it, every app using ServerSideApply (which is all of them, via
+      # the bootstrap-apps ApplicationSet) falls back to a 2-way diff, and 2-way
+      # diffs compare ATOMIC ARRAYS wholesale. Any field the API server defaults
+      # inside an array element then shows as permanent phantom drift --
+      # StatefulSet volumeClaimTemplates (apiVersion/kind/volumeMode) and
+      # HTTPRoute parentRefs/backendRefs (group/kind/weight) were the two shapes
+      # hit here. Seven apps sat OutOfSync forever with nothing actually wrong,
+      # which meant genuine drift on them would have been invisible.
+      controller.diff.server.side: "true"
     # RBAC configuration for accounts
     rbac:
       policy.csv: |
