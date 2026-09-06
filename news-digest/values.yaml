@@ -115,12 +115,12 @@ networkPolicy:
   enabled: true
   ingress:
     gatewayOnly: false
-    # Accept ONLY from the Hermes pod's namespace, on the service port. /run is
-    # additionally bearer-authed inside the app.
+    # Accept ONLY from within this namespace (the news-digest-trigger CronJob),
+    # on the service port. /run is additionally bearer-authed inside the app.
     customRules:
       - fromEndpoints:
           - matchLabels:
-              k8s:io.kubernetes.pod.namespace: hermes-agent
+              k8s:io.kubernetes.pod.namespace: news-digest
         toPorts:
           - ports:
               - port: "8080"

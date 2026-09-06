@@ -1,0 +1,6 @@
+namespace: news-digest
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../news-digest-trigger/values.yaml

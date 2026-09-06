@@ -1,0 +1,102 @@
+# news-digest weekly TRIGGER — a CronJob that POSTs /run to the news-digest
+# service. Separate app/release (distinct resource names) in the same namespace.
+# Reuses the service image (has python) and the service's Vault-synced secret for
+# the /run bearer. This is the scheduler; Hermes is not involved (its cron-script
+# credential scrub makes it unable to hold the bearer).
+workloadType: CronJob
+
+image:
+  repository: harbor.thorix.io/library/news-digest
+  tag: "v0.1.2"
+  pullPolicy: IfNotPresent
+
+cronjob:
+  schedule: "0 9 * * 5"   # Fri 09:00 UTC
+  concurrencyPolicy: Forbid
+  restartPolicy: OnFailure
+  backoffLimit: 1
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+# Override the image entrypoint: POST /run with the bearer, print the summary.
+# A non-2xx from /run raises -> non-zero exit -> the Job is marked Failed (visible).
+command:
+  - python
+  - -c
+  - |
+    import os, urllib.request
+    url = "http://news-digest-simple-service.news-digest.svc.cluster.local:8080/run"
+    req = urllib.request.Request(
+        url, data=b"", method="POST",
+        headers={"Authorization": "Bearer " + os.environ["RUN_BEARER_TOKEN"]},
+    )
+    with urllib.request.urlopen(req, timeout=180) as r:
+        print(r.status, r.read().decode())
+
+env:
+  - name: RUN_BEARER_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: news-digest-simple-service-credentials   # created by the service's Vault config
+        key: RUN_BEARER_TOKEN
+
+# CronJob needs no service / route / probes / storage.
+service:
+  enabled: false
+httproute:
+  enabled: false
+probes:
+  enabled: false
+persistence:
+  enabled: false
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  name: news-digest-trigger
+  automountServiceAccountToken: false
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 64Mi }
+
+# Egress jail: DNS + the in-namespace service only. No inbound.
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: false
+    customRules:
+      - fromEndpoints:
+          - matchLabels:
+              io.cilium.k8s.policy.deny-sentinel: no-inbound
+  egress:
+    denyAll: true
+    allowDNS: false
+    customRules:
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s:k8s-app: kube-dns
+        toPorts:
+          - ports:
+              - port: "53"
+                protocol: UDP
+              - port: "53"
+                protocol: TCP
+            rules:
+              dns:
+                - matchPattern: "*"
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: news-digest
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
