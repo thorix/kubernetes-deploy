@@ -1,0 +1,150 @@
+# news-digest service — public base (generic + location-clean).
+# The private rye overlay (kubernetes-config/rye/news-digest) adds the
+# location-revealing egress (news-feed hosts + the R2 account host) and the
+# interests.yaml ConfigMap (Wheat Ridge / 38th). Spec:
+# kubernetes-deploy-docs/docs/superpowers/specs/2026-09-06-news-digest-service-design.md
+workloadType: Deployment
+replicaCount: 1
+
+image:
+  repository: harbor.thorix.io/library/news-digest
+  tag: "v0.1.0"   # bumped by the thorix/ci build workflow
+  pullPolicy: IfNotPresent
+
+# ENTRYPOINT is `python -m app.server` (binds 0.0.0.0:8080).
+
+env:
+  - name: STATE_DIR
+    value: "/opt/state"
+  - name: INTERESTS_PATH
+    value: "/opt/interests/interests.yaml"
+  - name: PORT
+    value: "8080"
+  # Everything below is sourced from Vault (kv/news-digest/credentials) so no
+  # endpoints/keys/channel ids appear in this public base.
+  - name: R2_ACCESS_KEY_ID
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: R2_ACCESS_KEY_ID } }
+  - name: R2_SECRET_ACCESS_KEY
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: R2_SECRET_ACCESS_KEY } }
+  - name: R2_ENDPOINT
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: R2_ENDPOINT } }
+  - name: R2_BUCKET
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: R2_BUCKET } }
+  - name: SLACK_BOT_TOKEN
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: SLACK_BOT_TOKEN } }
+  - name: SLACK_CHANNEL_ID
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: SLACK_CHANNEL_ID } }
+  - name: OPENROUTER_BASE_URL
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: OPENROUTER_BASE_URL } }
+  - name: OPENROUTER_API_KEY
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: OPENROUTER_API_KEY } }
+  - name: OPENROUTER_MODEL
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: OPENROUTER_MODEL } }
+  - name: RUN_BEARER_TOKEN
+    valueFrom: { secretKeyRef: { name: news-digest-simple-service-credentials, key: RUN_BEARER_TOKEN } }
+
+# ClusterIP only — no external ingress. Reached solely by the Hermes pod (netpol).
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+httproute:
+  enabled: false
+
+probes:
+  enabled: true
+  liveness:
+    type: http
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    type: http
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 3
+    periodSeconds: 15
+    failureThreshold: 3
+
+# Small persistent volume for the dedup cursors (must survive restarts, else
+# a restart re-reports items).
+persistence:
+  enabled: true
+  mountPath: /opt/state
+  size: 1Gi
+  storageClassName: longhorn
+  accessModes: ["ReadWriteOnce"]
+
+podSecurityContext:
+  fsGroup: 65534   # so the non-root user can write /opt/state
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  name: news-digest
+  automountServiceAccountToken: false   # no k8s API access
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 256Mi }
+
+# Vault: sync kv/news-digest/credentials -> K8s Secret news-digest-simple-service-credentials.
+vault:
+  enabled: true
+  kubernetes:
+    role: news-digest
+    serviceAccount: news-digest
+  secrets:
+    credentials: news-digest/credentials
+
+# --- The security box ---
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: false
+    # Accept ONLY from the Hermes pod's namespace, on the service port. /run is
+    # additionally bearer-authed inside the app.
+    customRules:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: hermes-agent
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+  egress:
+    denyAll: true
+    allowDNS: false   # L7 DNS supplied below (required for toFQDNs)
+    customRules:
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s:k8s-app: kube-dns
+        toPorts:
+          - ports:
+              - port: "53"
+                protocol: UDP
+              - port: "53"
+                protocol: TCP
+            rules:
+              dns:
+                - matchPattern: "*"
+      - toFQDNs:
+          # Generic (non-location) egress lives here; the news-feed hosts and the
+          # R2 account host are added ONLY in the private rye overlay.
+          - matchName: slack.com
+          - matchName: api.slack.com
+          - matchName: inference-api.nousresearch.com
+        toPorts:
+          - ports:
+              - port: "443"
+                protocol: TCP
