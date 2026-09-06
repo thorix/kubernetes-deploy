@@ -12,7 +12,7 @@ strategy:
 
 image:
   repository: harbor.thorix.io/library/news-digest
-  tag: "v0.1.4"   # bumped by the thorix/ci build workflow
+  tag: "v0.1.5"   # bumped by the thorix/ci build workflow
   pullPolicy: IfNotPresent
 
 # ENTRYPOINT is `python -m app.server` (binds 0.0.0.0:8080).
