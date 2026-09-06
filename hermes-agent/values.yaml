@@ -51,6 +51,30 @@ env:
     value: "https://inference-api.nousresearch.com/v1"  # hygiene:allow
   - name: OPENROUTER_MODEL
     value: "anthropic/claude-sonnet-4.5"
+  # R2 newsletter inbox (weekly-digest bucket) — read via the r2-pull.py helper.
+  # All four values come from Vault (kv/hermes-agent/r2) so the account-specific
+  # endpoint stays OUT of this public base. The R2 egress host is account-/
+  # location-identifying, so it lives ONLY in the private overlay's egress list.
+  - name: R2_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-r2
+        key: R2_ACCESS_KEY_ID
+  - name: R2_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-r2
+        key: R2_SECRET_ACCESS_KEY
+  - name: R2_ENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-r2
+        key: R2_ENDPOINT
+  - name: R2_BUCKET
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-r2
+        key: R2_BUCKET
 
 # Phase 0: no inbound. Access is `kubectl port-forward` only.
 service:
@@ -127,6 +151,7 @@ vault:
   secrets:
     credentials: hermes-agent/credentials
     slack: hermes-agent/slack
+    r2: hermes-agent/r2
 
 # --- The security box ---
 networkPolicy:
