@@ -23,21 +23,6 @@ env:
       secretKeyRef:
         name: hermes-agent-simple-service-credentials
         key: NOUS_API_KEY
-  - name: SLACK_BOT_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-slack
-        key: SLACK_BOT_TOKEN
-  # App-level token — Hermes's Slack integration uses Socket Mode (a WSS
-  # connection), which requires this in addition to the bot token.
-  - name: SLACK_APP_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-slack
-        key: SLACK_APP_TOKEN
-  # Restrict the bot to the single channel it delivers to (tightening).
-  - name: SLACK_ALLOWED_CHANNELS
-    value: "weekly-digest"
   # Model provider: Hermes's `openrouter` provider, pointed at Nous Portal's
   # OpenAI-compatible inference endpoint (the key works as a plain bearer;
   # chat completions verified 200). Without OPENROUTER_BASE_URL the provider
@@ -51,30 +36,6 @@ env:
     value: "https://inference-api.nousresearch.com/v1"  # hygiene:allow
   - name: OPENROUTER_MODEL
     value: "anthropic/claude-sonnet-4.5"
-  # R2 newsletter inbox (weekly-digest bucket) — read via the r2-pull.py helper.
-  # All four values come from Vault (kv/hermes-agent/r2) so the account-specific
-  # endpoint stays OUT of this public base. The R2 egress host is account-/
-  # location-identifying, so it lives ONLY in the private overlay's egress list.
-  - name: R2_ACCESS_KEY_ID
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-r2
-        key: R2_ACCESS_KEY_ID
-  - name: R2_SECRET_ACCESS_KEY
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-r2
-        key: R2_SECRET_ACCESS_KEY
-  - name: R2_ENDPOINT
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-r2
-        key: R2_ENDPOINT
-  - name: R2_BUCKET
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-r2
-        key: R2_BUCKET
 
 # Phase 0: no inbound. Access is `kubectl port-forward` only.
 service:
@@ -150,8 +111,6 @@ vault:
     serviceAccount: hermes-agent
   secrets:
     credentials: hermes-agent/credentials
-    slack: hermes-agent/slack
-    r2: hermes-agent/r2
 
 # --- The security box ---
 networkPolicy:
@@ -183,16 +142,10 @@ networkPolicy:
               dns:
                 - matchPattern: "*"
       - toFQDNs:
+          # Model provider only. Hermes is idle (its digest task moved to the
+          # standalone news-digest service); no Slack/R2 egress needed.
           - matchName: inference-api.nousresearch.com
           - matchName: portal.nousresearch.com
-          # Slack delivery (generic). Location-revealing news-feed egress lives
-          # ONLY in the private overlay (kubernetes-config/rye/hermes-agent),
-          # which restates this whole egress list with the feed hosts added.
-          - matchName: slack.com
-          - matchName: api.slack.com
-          # Socket Mode opens a WSS connection to these hosts.
-          - matchName: wss-primary.slack.com
-          - matchName: wss-backup.slack.com
         toPorts:
           - ports:
               - port: "443"
