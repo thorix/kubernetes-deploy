@@ -364,6 +364,16 @@ spec:
             - port: "8080"
               protocol: TCP
   egress:
+    # jobservice → trivy. jobservice executes the IMAGE_SCAN job and calls the
+    # trivy adapter directly, so without this no scan can ever start.
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: trivy
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # jobservice → core (callbacks, API calls)
     - toEndpoints:
         - matchLabels:
@@ -548,8 +558,35 @@ spec:
     - fromEntities:
         - host
         - remote-node
-    # From core (scan requests)
+    # From core and jobservice. jobservice is the one that actually runs the
+    # IMAGE_SCAN job and calls the trivy adapter API, so omitting it meant every
+    # scan failed -- Harbor reported the scan as "Error" with no clue why, and
+    # trivy logged nothing because the request never arrived.
     - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: core
+        - matchLabels:
+            app: harbor
+            component: jobservice
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # trivy → redis. The adapter uses redis as its job/state store. This is the
+    # egress half; redis's ingress already allows trivy, which on its own was not
+    # enough -- the drop was on trivy's side (bpf_lxc egress), not redis's.
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    # trivy → core (auth token) and registry (pull the image layers to scan)
+    - toEndpoints:
         - matchLabels:
             app: harbor
             component: core
@@ -557,7 +594,14 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: harbor
+            component: registry
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
     # trivy → internet (vulnerability DB updates)
     - toEntities:
         - world
