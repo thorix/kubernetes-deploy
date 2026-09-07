@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cronjob.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.cronjob.activeDeadlineSeconds }}
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ .Release.Name }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            # The image runs as UID 10001 while the PVC is created root-owned.
+            # Without fsGroup, Trivy fails with "mkdir /cache/db: permission
+            # denied" -- which it reports as a *download* error, so it reads as
+            # a network or rate-limit problem rather than a permissions one.
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: image-inquisitor
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - --source-id={{ .Values.sourceID }}
+                - --image-sources=kubernetes
+                - --report-outputs={{ .Values.reportOutputs }}
+                - --harbor-registries={{ .Values.harborRegistries }}
+                {{- with .Values.excludeNamespaces }}
+                - --exclude-kubernetes-namespaces={{ . }}
+                {{- end }}
+              env:
+                - name: TRIVY_CACHE_DIR
+                  value: /cache
+                - name: TRIVY_DB_REPOSITORY
+                  value: {{ .Values.trivy.dbRepository | quote }}
+                # Trivy writes its work files here before moving them into the
+                # cache; the image is FROM scratch so /tmp is tiny.
+                - name: TMPDIR
+                  value: /tmp-work
+              volumeMounts:
+                - name: trivy-cache
+                  mountPath: /cache
+                - name: tmp-work
+                  mountPath: /tmp-work
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: trivy-cache
+              persistentVolumeClaim:
+                claimName: {{ .Release.Name }}-trivy-cache
+            - name: tmp-work
+              emptyDir:
+                sizeLimit: 4Gi

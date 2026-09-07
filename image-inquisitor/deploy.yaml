@@ -1,0 +1,7 @@
+# image-inquisitor — nightly image/CVE inventory of everything running in the
+# cluster. Harbor's own Trivy only scans images stored IN Harbor (10 of the 123
+# distinct images running here); this covers the rest.
+namespace: image-inquisitor
+helm:
+- valuesFiles:
+  - values.yaml

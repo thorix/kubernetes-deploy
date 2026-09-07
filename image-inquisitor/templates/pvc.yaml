@@ -1,0 +1,15 @@
+# Holds the Trivy vulnerability DB (~1.3G) between runs. Without this every run
+# re-downloads it, which is both slow and the thing that trips registry rate
+# limits.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-trivy-cache
+  namespace: {{ .Release.Namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.trivy.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.trivy.cacheSize }}

@@ -1,0 +1,44 @@
+image:
+  repository: harbor.thorix.io/library/image-inquisitor
+  tag: v0.1.0-thorix
+  pullPolicy: IfNotPresent
+
+cronjob:
+  # Once a day, deliberately. Each run refreshes the Trivy vulnerability DB, and
+  # keeping that to one pull per day is the whole reason for the cache PVC and
+  # the Harbor-proxied DB repository below.
+  schedule: "0 15 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  backoffLimit: 1
+  # Scanning ~120 images takes a while; do not let a run be reaped mid-scan.
+  activeDeadlineSeconds: 10800
+
+sourceID: rye-cluster
+
+# Reports emitted as JSON on stdout, one object per line, for Alloy -> Loki.
+reportOutputs: "summary,imageSummary,imageRegistry,imageVulnerabilities,imageKubernetes"
+
+# Self-hosted registries cannot be auto-detected; without this, everything
+# served from Harbor reports a bare tag with no age.
+harborRegistries: "harbor.thorix.io"
+
+excludeNamespaces: ""
+
+trivy:
+  # Persisted so the DB is not re-downloaded on every run. Trivy refreshes it
+  # when older than 6h, so a daily schedule means one refresh per run.
+  cacheSize: 5Gi
+  storageClass: longhorn
+  # Pull the DB through Harbor's ghcr proxy rather than ghcr.io directly. Harbor
+  # caches it (ghcr-cache/aquasecurity/trivy-db), so repeated pulls are served
+  # locally and never hit GHCR's anonymous rate limits.
+  dbRepository: harbor.thorix.io/ghcr-cache/aquasecurity/trivy-db
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 3Gi
