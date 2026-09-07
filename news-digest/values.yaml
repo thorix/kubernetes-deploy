@@ -12,7 +12,7 @@ strategy:
 
 image:
   repository: harbor.thorix.io/library/news-digest
-  tag: "v0.1.6"   # bumped manually (org Actions policy disables CI build)
+  tag: "v0.1.7"   # bumped manually (org Actions policy disables CI build)
   pullPolicy: IfNotPresent
 
 # ENTRYPOINT is `python -m app.server` (binds 0.0.0.0:8080).
