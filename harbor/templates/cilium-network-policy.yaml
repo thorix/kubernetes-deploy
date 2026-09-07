@@ -139,6 +139,18 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # From trivy. The scanner authenticates against core's /v2/ endpoint before
+    # pulling the layers it scans. Allowing trivy's EGRESS to core was not
+    # enough -- the drop was here, on core's ingress, and only visible on the
+    # node running core rather than the node running trivy.
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: trivy
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     # core → registry (image operations)
     - toEndpoints:
@@ -294,6 +306,15 @@ spec:
         - matchLabels:
             app: harbor
             component: jobservice
+      toPorts:
+        - ports:
+            - port: "5000"
+              protocol: TCP
+    # From trivy, which pulls the image layers it scans.
+    - fromEndpoints:
+        - matchLabels:
+            app: harbor
+            component: trivy
       toPorts:
         - ports:
             - port: "5000"
