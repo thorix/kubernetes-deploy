@@ -43,15 +43,21 @@ spec:
                   value: /cache
                 - name: TRIVY_DB_REPOSITORY
                   value: {{ .Values.trivy.dbRepository | quote }}
-                # Trivy writes its work files here before moving them into the
-                # cache; the image is FROM scratch so /tmp is tiny.
+                # Kept for tools that honour it, but the writable /tmp mount below
+                # is what actually matters -- image-inquisitor creates its Trivy
+                # scratch directory at /tmp directly, ignoring TMPDIR.
                 - name: TMPDIR
-                  value: /tmp-work
+                  value: /tmp
               volumeMounts:
                 - name: trivy-cache
                   mountPath: /cache
+                # readOnlyRootFilesystem makes /tmp unwritable, and the tool creates
+                # its Trivy working directory there. Without this the scan step
+                # fails with "mkdir /tmp/trivy_*: read-only file system" and the
+                # run still exits 0 -- you simply get registry and kubernetes
+                # reports with no vulnerability data at all.
                 - name: tmp-work
-                  mountPath: /tmp-work
+                  mountPath: /tmp
               resources:
                 {{- toYaml .Values.resources | nindent 16 }}
               securityContext:
