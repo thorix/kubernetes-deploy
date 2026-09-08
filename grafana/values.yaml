@@ -47,6 +47,11 @@ grafana:
           implementation: prometheus
       - name: Loki
         type: loki
+        # Pinned so dashboards can reference it deterministically. Without an
+        # explicit uid Grafana generates a random one at provisioning time, and
+        # any dashboard JSON that names a datasource by uid silently returns no
+        # data -- the panels render, just empty, which looks like a bad query.
+        uid: loki
         url: http://loki.victoriametrics.svc:3100
         access: proxy
 
