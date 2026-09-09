@@ -1,6 +1,8 @@
 image:
   repository: harbor.thorix.io/library/image-inquisitor
-  tag: v0.1.0-thorix
+  # v0.2.0 adds ageDays to the vulnerability report, so image age can be sorted
+  # and colour-coded rather than only displayed as a timestamp.
+  tag: v0.2.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
