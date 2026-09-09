@@ -2,7 +2,7 @@ schedule: "0 3 * * *"  # Daily at 3 AM (1 hour after Immich's 2 AM backup)
 
 image:
   repository: alpine
-  tag: "3.23"
+  tag: "3.24"
   pullPolicy: IfNotPresent
 
 # Minimum acceptable backup size (bytes). Real dumps are ~17MB.
