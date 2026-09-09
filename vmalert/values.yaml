@@ -241,6 +241,20 @@ server:
       # fire on the DELTA — a disk actively getting worse — not on the total.
       # A static count may be years old and harmless; a rising one is not.
       #
+      # The delta is written as `X - min_over_time(X[24h])`, NOT `increase(X[24h])`.
+      # Both smartctl_device_attribute and zpool_vdev_errors_total are exported as
+      # GAUGES (the latter despite its _total suffix), and increase() is a counter
+      # function: it extrapolates to the edges of the range, so a series that only
+      # started partway through the window reports a jump that never happened.
+      # That is not hypothetical — every one of these rules fired the moment red's
+      # exporters were reinstalled, on counters that were provably flat.
+      # Subtracting the window's own floor is immune to that, and it also stays
+      # quiet through a `zpool clear` (value and floor both drop to zero together)
+      # where max_over_time would report a phantom rise.
+      #
+      # NvmeMediaErrorsIncreasing below keeps increase() on purpose:
+      # smartctl_device_media_errors really is exported as a counter.
+      #
       # State alerts (pool not ONLINE, SMART self-assessment failed, permanent
       # data errors) DO fire on absolute state, because those need attention
       # regardless of when they started.
@@ -252,7 +266,7 @@ server:
       - name: disk-health
         rules:
         - alert: SmartCounterIncreasing
-          expr: increase(smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Reallocated_Sector_Ct|Current_Pending_Sector|Offline_Uncorrectable|Reported_Uncorrect"}[24h]) > 0
+          expr: (smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Reallocated_Sector_Ct|Current_Pending_Sector|Offline_Uncorrectable|Reported_Uncorrect"} - min_over_time(smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Reallocated_Sector_Ct|Current_Pending_Sector|Offline_Uncorrectable|Reported_Uncorrect"}[24h])) > 0
           for: 10m
           labels:
             severity: warning
@@ -260,7 +274,7 @@ server:
             summary: "SMART {{ $labels.attribute_name }} rising on {{ $labels.instance }} {{ $labels.device }}"
             description: "Up by {{ $value }} in 24h. A growing count means the disk is degrading now; a static count may be years old and harmless."
         - alert: SmartCrcErrorsIncreasing
-          expr: increase(smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"}[24h]) > 0
+          expr: (smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"} - min_over_time(smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"}[24h])) > 0
           for: 10m
           labels:
             severity: warning
@@ -308,7 +322,7 @@ server:
             summary: "ZFS pool {{ $labels.pool }} on {{ $labels.instance }} reports {{ $value }} permanent data errors"
             description: "Files are unrecoverable from parity. Run 'zpool status -v' to list them, restore from backup, then 'zpool clear'."
         - alert: ZpoolVdevErrorsIncreasing
-          expr: increase(zpool_vdev_errors_total[24h]) > 0
+          expr: (zpool_vdev_errors_total - min_over_time(zpool_vdev_errors_total[24h])) > 0
           for: 10m
           labels:
             severity: warning
@@ -316,7 +330,7 @@ server:
             summary: "ZFS {{ $labels.type }} errors rising on {{ $labels.pool }} vdev {{ $labels.vdev }}"
             description: "Up by {{ $value }} in 24h on {{ $labels.instance }}. Note these counters reset on 'zpool clear' and on import, so this is since the last clear."
         - alert: DiskMetricsExporterDown
-          expr: up{job=~".*-(smart|zpool)"} == 0
+          expr: up{job=~"(red|oatmeal)-(node|smart)"} == 0
           for: 15m
           labels:
             severity: warning
