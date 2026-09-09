@@ -193,14 +193,43 @@ server:
           annotations:
             summary: "Immich server memory usage above 85%"
             description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit. Current: {{ $value | humanize }}. May OOMKill soon."
-        - alert: ImmichBackupVerifyFailed
-          expr: kube_job_status_failed{namespace="immich", job_name=~"immich-backup-verify.*"} > 0
-          for: 5m
+        # Alerts on the CronJob not having SUCCEEDED recently, rather than on a
+        # failed Job object existing.
+        #
+        # kube_job_status_failed counts failed Job objects that are still in the
+        # cluster, and this CronJob keeps failedJobsHistoryLimit: 3. So three runs
+        # that failed on 2026-06 and 2026-08-29/30 (during the red rebuild, when the
+        # SMB share holding the dumps was unreachable) pinned this alert on forever,
+        # while the verification itself had been succeeding daily for over a week.
+        # Same sticky-alert defect as the OOM rules: an alert that fires forever is
+        # indistinguishable from one that never fires.
+        #
+        # The replacement is also strictly broader. The old rule could only fire when
+        # a failed Job existed, so it was blind to the CronJob being suspended, the
+        # controller never scheduling it, or the Jobs being pruned -- all of which
+        # stop verification just as dead. "Has not succeeded in 2 days" catches every
+        # one of those, and self-clears the moment a run succeeds.
+        #
+        # 2 days rather than 1: the schedule is daily at 03:00, so a single missed or
+        # retried run is not yet a problem worth waking someone for.
+        - alert: ImmichBackupVerifyStale
+          expr: time() - kube_cronjob_status_last_successful_time{namespace="immich", cronjob="immich-backup-verify"} > 86400 * 2
+          for: 15m
           labels:
             severity: critical
           annotations:
-            summary: "Immich database backup verification failed"
-            description: "The daily backup verification job failed. Today's pg_dump may be missing or corrupted. Check job logs: kubectl logs -n immich job/{{ $labels.job_name }}"
+            summary: "Immich backup verification has not succeeded in over 2 days"
+            description: "Last successful run was {{ $value | humanizeDuration }} ago. Today's pg_dump may be missing, corrupted, or unreachable -- or the CronJob may be suspended or not scheduling. Check: kubectl get cronjob,job -n immich | grep backup-verify"
+        # Absent means the CronJob itself is gone from the cluster, which the staleness
+        # rule above cannot see -- no metric, no comparison, no alert.
+        - alert: ImmichBackupVerifyMissing
+          expr: absent(kube_cronjob_status_last_successful_time{namespace="immich", cronjob="immich-backup-verify"})
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Immich backup verification CronJob is missing"
+            description: "kube_cronjob_status_last_successful_time reports nothing for immich-backup-verify, so the CronJob has been deleted or has never completed a successful run. Nothing is checking that the nightly pg_dump exists."
       # Both rules read kube_pod_container_status_last_terminated_*, which describes
       # the LAST termination and therefore persists for the whole lifetime of the
       # pod. Ungated they are sticky: a container killed once keeps firing critical
