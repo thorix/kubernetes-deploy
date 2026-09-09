@@ -6,7 +6,13 @@ server:
       url: http://victoriametrics-victoria-metrics-single-server:8428
   notifier:
     alertmanager:
-      url: http://vmalert-alertmanager:9093
+      # Must be the chart's generated Service name -- release name "vmalert" plus
+      # chart name "victoria-metrics-alert" plus "-alertmanager". The short form
+      # "vmalert-alertmanager" does not exist and never has: vmalert logged
+      # "lookup vmalert-alertmanager ... no such host" on every rule evaluation
+      # since the initial commit, so NO alert from any group was ever delivered.
+      # Compare datasource.url above, which uses the same generated-name pattern.
+      url: http://vmalert-victoria-metrics-alert-alertmanager:9093
   resources:
     requests:
       cpu: 50m
@@ -195,24 +201,42 @@ server:
           annotations:
             summary: "Immich database backup verification failed"
             description: "The daily backup verification job failed. Today's pg_dump may be missing or corrupted. Check job logs: kubectl logs -n immich job/{{ $labels.job_name }}"
+      # Both rules read kube_pod_container_status_last_terminated_*, which describes
+      # the LAST termination and therefore persists for the whole lifetime of the
+      # pod. Ungated they are sticky: a container killed once keeps firing critical
+      # forever. Measured on 2026-09-09, 39 series were firing from terminations up
+      # to 17 DAYS old, mostly longhorn pods SIGKILLed during node drains. That is
+      # not a backlog that drains -- long-lived pods never clear it.
+      #
+      # So both are gated on the container having actually restarted in the last
+      # hour. kube_pod_container_status_restarts_total is a real counter, so
+      # increase() is correct here. The gate took 39 firing series down to 2, and
+      # those 2 were a genuine ongoing OOM loop in opnsense-mcp that the other 37
+      # were burying. An alert that fires forever is indistinguishable from one
+      # that never fires.
       - name: oom
         rules:
         - alert: ContainerOOMKilled
-          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1 and on(namespace,pod,container) increase(kube_pod_container_status_restarts_total[1h]) > 0
           for: 0m
           labels:
             severity: critical
           annotations:
             summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} was OOMKilled"
-            description: "Container was terminated due to exceeding its memory limit. Review resource limits and consider increasing."
+            description: "Container was terminated due to exceeding its memory limit, and has restarted within the last hour. Review resource limits and consider increasing."
+        # `unless` the OOMKilled rule above: exit 137 IS how an OOMKill surfaces, so
+        # without this one OOM raised two critical pages for the same container.
+        # What is left here is a SIGKILL that was not an OOM -- an eviction, a drain
+        # or a failed liveness probe -- which is a different problem with a
+        # different fix, and is why the summary no longer guesses "likely OOMKilled".
         - alert: ContainerExitCode137
-          expr: kube_pod_container_status_last_terminated_exitcode == 137
+          expr: (kube_pod_container_status_last_terminated_exitcode == 137 and on(namespace,pod,container) increase(kube_pod_container_status_restarts_total[1h]) > 0) unless on(namespace,pod,container) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
           for: 0m
           labels:
-            severity: critical
+            severity: warning
           annotations:
-            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} exited with code 137 (likely OOMKilled)"
-            description: "Exit code 137 indicates SIGKILL, usually from OOM. Check memory limits."
+            summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} was SIGKILLed (exit 137, not an OOM)"
+            description: "Container restarted within the last hour after a SIGKILL that kube-state-metrics does not attribute to OOM -- typically an eviction, a node drain, or a liveness probe timeout."
       - name: argocd
         rules:
         - alert: ArgoCDRepoServerUnavailable
