@@ -109,7 +109,7 @@ configMap:
 
 initContainers:
 - name: copy-config
-  image: busybox:1.37
+  image: busybox:1.38
   command: ['sh', '-c', 'cp /config-ro/config.yml /config/config.yml']
   volumeMounts:
   - name: config
