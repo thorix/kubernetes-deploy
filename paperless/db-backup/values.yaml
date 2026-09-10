@@ -26,7 +26,7 @@ verify:
   schedule: "0 5 * * *"
   image:
     repository: alpine
-    tag: "3.23"
+    tag: "3.24"
     pullPolicy: IfNotPresent
   # Minimum acceptable backup size (bytes). Paperless DB is small; 50KB floor.
   minSizeBytes: 51200
