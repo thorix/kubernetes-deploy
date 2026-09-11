@@ -2,7 +2,15 @@ image:
   repository: harbor.thorix.io/library/image-inquisitor
   # v0.2.0 adds ageDays to the vulnerability report, so image age can be sorted
   # and colour-coded rather than only displayed as a timestamp.
-  tag: v0.2.1-thorix
+  #
+  # v0.3.0 adds runningTag/latestSemverTag/upgradeState to the VULNERABILITY
+  # report. Those already existed on the registry report, but a CVE count is
+  # only actionable next to "is there anything newer to move to" -- 61% of this
+  # cluster's criticals sit on images already running the newest tag their
+  # registry knows about. Carrying it on the same record removes a join in every
+  # consumer; in Grafana that join was across two queries whose keys repeat once
+  # per scan, which is unreliable.
+  tag: v0.3.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
