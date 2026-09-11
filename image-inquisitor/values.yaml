@@ -10,7 +10,12 @@ image:
   # registry knows about. Carrying it on the same record removes a join in every
   # consumer; in Grafana that join was across two queries whose keys repeat once
   # per scan, which is unreliable.
-  tag: v0.3.0-thorix
+  #
+  # v0.3.1 makes upgradeState ALWAYS present. v0.3.0 only set it when a registry
+  # report existed, which left 19 of 122 images (103 criticals) with no field at
+  # all -- and Loki drops records with a missing label from a label filter, so
+  # those would have silently vanished from the filtered "needs attention" view.
+  tag: v0.3.1-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
