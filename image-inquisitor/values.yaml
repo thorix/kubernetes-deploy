@@ -27,7 +27,15 @@ image:
   # "0000-12-31", and upgradeState is emitted so the drift panel can be filtered
   # like the CVE panel. The current/check/unknown comparison now lives in exactly
   # one place rather than being duplicated between the two reports.
-  tag: v0.4.0-thorix
+  #
+  # v0.5.0 stops emitting the full per-CVE list by default. That array was 27 MB
+  # of a 27 MB scan -- effectively the whole payload -- and pushed 22 lines past
+  # Loki's 256 KB max_line_size, which drops them at ingest silently. Because line
+  # size scales with CVE count, the dropped images were the ones with the MOST
+  # vulnerabilities: Loki held 104 of 121, and open-webui (57 criticals, the
+  # largest actionable item here) was never ingested at all. Largest line falls
+  # from 7117 KB to 0.7 KB. Re-enable with --vulnerability-detail if ever needed.
+  tag: v0.5.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
