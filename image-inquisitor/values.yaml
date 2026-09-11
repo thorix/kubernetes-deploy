@@ -15,7 +15,13 @@ image:
   # report existed, which left 19 of 122 images (103 criticals) with no field at
   # all -- and Loki drops records with a missing label from a label filter, so
   # those would have silently vanished from the filtered "needs attention" view.
-  tag: v0.3.1-thorix
+  #
+  # v0.3.2 omits ageDays entirely when the image's created date is unusable,
+  # instead of reporting 0. registry.k8s.io/external-dns pins created to the Unix
+  # epoch for reproducible builds, so it rendered as "0 day" old beside its own
+  # 1970 build date and sorted to the top of any age-ascending view. A blank cell
+  # is the only honest rendering of "we do not know".
+  tag: v0.3.2-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
