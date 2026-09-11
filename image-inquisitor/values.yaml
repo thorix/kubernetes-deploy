@@ -21,7 +21,13 @@ image:
   # epoch for reproducible builds, so it rendered as "0 day" old beside its own
   # 1970 build date and sorted to the top of any age-ascending view. A blank cell
   # is the only honest rendering of "we do not know".
-  tag: v0.3.2-thorix
+  #
+  # v0.4.0 fixes the registry report the same two ways the vulnerability report
+  # was fixed: zero/epoch timestamps are omitted instead of serialising as
+  # "0000-12-31", and upgradeState is emitted so the drift panel can be filtered
+  # like the CVE panel. The current/check/unknown comparison now lives in exactly
+  # one place rather than being duplicated between the two reports.
+  tag: v0.4.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
