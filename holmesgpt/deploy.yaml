@@ -6,7 +6,7 @@ namespace: holmesgpt
 helm:
 - chart: holmes
   repoURL: https://robusta-charts.storage.googleapis.com
-  targetRevision: "0.31.1"
+  targetRevision: "0.40.0"
   valuesFiles:
   - holmesgpt/values.yaml
 - path: holmesgpt/health-checks
