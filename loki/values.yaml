@@ -21,6 +21,35 @@ loki:
     reject_old_samples_max_age: 168h
     volume_enabled: true
     retention_period: 30d
+
+    # Raised from the 256KB default.
+    #
+    # This is the only ingest limit with no burst allowance: a line over it is
+    # discarded outright, with no error in Loki's log, none in Alloy's, and no gap
+    # any query can distinguish from "nothing was logged". It had already cost us
+    # real data -- image-inquisitor embedded full CVE lists, so line size scaled
+    # with vulnerability count and the images being dropped were precisely the
+    # ones with the MOST vulnerabilities. 17 of 121 never arrived and the CVE
+    # dashboard under-reported worst-first for its entire existence.
+    #
+    # The producer is fixed (27 MB per scan down to 70 KB), so this is margin for
+    # the next producer that does something similar, not a fix for that one. 1MB
+    # still rejects genuinely pathological output rather than letting it through.
+    max_line_size: 1MB
+    # Loki truncates rather than dropping when a line still exceeds the limit, so
+    # an oversized line loses its tail instead of vanishing entirely. Partial data
+    # that is visibly partial beats data that silently never existed.
+    max_line_size_truncate: true
+
+    # Burst raised from the 15MB default; the sustained 3MB/s rate is unchanged.
+    #
+    # Measured ingest is 0.124 MB/s against a 4 MB/s global limit -- 32x headroom
+    # -- so global throughput is not the constraint and ingestion_rate_mb is
+    # deliberately left alone. What a batch producer hits is the PER-STREAM burst:
+    # a scan writing tens of MB from a single pod in seconds exhausts 15MB while
+    # the global rate never notices. That shape is what Loki's defaults assume
+    # does not happen.
+    per_stream_rate_limit_burst: 32MB
   compactor:
     retention_enabled: true
     delete_request_store: filesystem
