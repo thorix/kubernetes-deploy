@@ -45,7 +45,14 @@ image:
   # adds scan_timestamp/images_scanned/scan_duration so a CronJob that stops
   # running becomes visible -- there is no pod to alert on today, so the data
   # simply stops changing while the dashboards keep rendering the last result.
-  tag: v0.6.0-thorix
+  #
+  # v0.7.0 publishes latest_tag_age_days, which separates "somebody needs to act"
+  # from "this fixes itself": Renovate holds every update for minimumReleaseAge
+  # before opening a PR, so criticals on an image whose newest tag shipped
+  # yesterday are already handled, while ones available for months are not. On
+  # this cluster that splits 81 criticals still soaking from 147 where the release
+  # has been sitting available.
+  tag: v0.7.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
