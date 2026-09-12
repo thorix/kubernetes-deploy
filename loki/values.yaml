@@ -27,6 +27,26 @@ loki:
 
 singleBinary:
   replicas: 1
+  # Let the kubernetes-pods scrape job collect Loki's own metrics.
+  #
+  # Loki already counts everything it throws away in loki_discarded_samples_total
+  # and loki_discarded_bytes_total, broken down by reason. Nothing was collecting
+  # them, so the drops were invisible: a line over max_line_size is rejected at
+  # ingest with no error in Loki's log, none in Alloy's, and no gap that any query
+  # can distinguish from "nothing was logged".
+  #
+  # That mattered. image-inquisitor's vulnerability lines reached 7 MB because they
+  # embedded the full CVE list, and line size scales with CVE count -- so the
+  # images being silently dropped were precisely the ones with the most
+  # vulnerabilities. 17 of 121 never reached Loki at all, and the CVE dashboard
+  # under-reported worst-first for as long as it had existed.
+  #
+  # The counters also show ~5M samples dropped as rate_limited and ~2M as
+  # too_far_behind, which nothing has ever surfaced either.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3100"
+    prometheus.io/path: "/metrics"
   resources:
     requests:
       cpu: 50m

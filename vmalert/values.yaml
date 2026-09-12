@@ -328,6 +328,42 @@ server:
       # absent for 23h55m out of every 24h. An alert written against it directly
       # would fire permanently and be silenced within a day, which is worse than
       # having no alert at all.
+      # Loki silently discarding logs.
+      #
+      # This is the quietest failure in the stack. A line over max_line_size is
+      # rejected at ingest with NO error in Loki's log, none in Alloy's, and no
+      # gap any query can tell apart from "nothing was logged". The only evidence
+      # is a counter that nothing was collecting until the Loki pods were
+      # annotated for scraping.
+      #
+      # It had already cost us: image-inquisitor's vulnerability lines reached
+      # 7 MB because they embedded the full CVE list, and since line size scales
+      # with CVE count the images being dropped were exactly the ones with the
+      # most vulnerabilities. 17 of 121 never arrived, so the CVE dashboard
+      # under-reported worst-first for its entire existence.
+      #
+      # Alerting on the RATE, not the total. These counters are cumulative and
+      # already carry millions of historical drops, so any absolute threshold
+      # fires immediately and forever -- the same sticky-alert trap as the OOM
+      # rules. A rate answers the question that matters: are we losing logs NOW.
+      - name: loki-ingest
+        rules:
+        - alert: LokiDroppingOversizedLines
+          expr: sum(rate(loki_discarded_samples_total{reason="line_too_long"}[30m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki is discarding log lines for exceeding max_line_size"
+            description: "Lines are being rejected at ingest and there is no other signal that this is happening -- no error in Loki, none in Alloy, and the data simply appears never to have been logged. Find the source with: sum by (namespace) (rate(loki_discarded_samples_total[30m])). Either shrink what the producer emits or raise limits_config.max_line_size."
+        - alert: LokiDiscardingLogs
+          expr: sum by (reason) (rate(loki_discarded_samples_total{reason!="line_too_long"}[30m])) > 10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki is discarding logs: {{ $labels.reason }} ({{ $value | humanize }}/s)"
+            description: "Sustained log loss for reason '{{ $labels.reason }}'. rate_limited means ingestion_rate_mb is too low for current volume; too_far_behind and greater_than_max_sample_age mean timestamps fall outside the accepted window, usually a producer backfilling or a clock problem. Threshold is 10/s so ordinary bursts do not page."
       - name: image-inquisitor
         rules:
         - alert: ImageInquisitorScanStale
