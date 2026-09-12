@@ -316,6 +316,39 @@ server:
       # firmware reports wear figures that disagree wildly with actual bytes
       # written, which would make that field a permanent false alarm. Available
       # spare and media errors are the trustworthy NVMe signals.
+      # Liveness of the image-inquisitor scan.
+      #
+      # Nothing noticed this CronJob dying, and nothing could: a CronJob has no
+      # long-lived pod, so PodNotReady and CrashLoopBackOff never apply. The scan
+      # simply stops and every dashboard keeps rendering the previous result --
+      # indistinguishable from a healthy cluster whose numbers have not moved.
+      #
+      # Both rules wrap last_over_time(...[7d]). The scan runs once a day and
+      # VictoriaMetrics' default lookback is five minutes, so the bare metric is
+      # absent for 23h55m out of every 24h. An alert written against it directly
+      # would fire permanently and be silenced within a day, which is worse than
+      # having no alert at all.
+      - name: image-inquisitor
+        rules:
+        - alert: ImageInquisitorScanStale
+          expr: (time() - last_over_time(image_inquisitor_scan_timestamp_seconds[7d])) > 86400 * 2
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image vulnerability scan has not completed in {{ $value | humanizeDuration }}"
+            description: "The daily image-inquisitor scan last finished {{ $value | humanizeDuration }} ago, so the CVE dashboards are showing stale data while looking perfectly normal. Two days allows one missed run before alerting. Check: kubectl get cronjob,job -n image-inquisitor"
+        # absent() is the only way to catch the CronJob being deleted or never
+        # having run: with no series at all there is nothing for the staleness
+        # comparison above to evaluate.
+        - alert: ImageInquisitorScanMissing
+          expr: absent(last_over_time(image_inquisitor_scan_timestamp_seconds[7d]))
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image vulnerability scanning has stopped entirely"
+            description: "No image-inquisitor scan has been recorded in seven days. The CronJob is likely deleted, suspended, or has never successfully published metrics. Nothing is checking running images for CVEs."
       - name: disk-health
         rules:
         - alert: SmartCounterIncreasing
