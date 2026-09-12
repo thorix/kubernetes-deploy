@@ -40,7 +40,12 @@ image:
   # append, so gating the append also stopped the counting and a scan reporting
   # 499 criticals came back with 1. Counting now happens before the detail gate;
   # the flag controls payload only and never the numbers.
-  tag: v0.5.1-thorix
+  #
+  # v0.6.0 publishes scan results as Prometheus metrics alongside the logs, and
+  # adds scan_timestamp/images_scanned/scan_duration so a CronJob that stops
+  # running becomes visible -- there is no pod to alert on today, so the data
+  # simply stops changing while the dashboards keep rendering the last result.
+  tag: v0.6.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
@@ -63,6 +68,20 @@ reportOutputs: "summary,imageSummary,imageRegistry,imageVulnerabilities,imageKub
 # Self-hosted registries cannot be auto-detected; without this, everything
 # served from Harbor reports a bare tag with no age.
 harborRegistries: "harbor.thorix.io"
+
+# Publish scan results as metrics in addition to the log reports.
+#
+# Logs have no concept of current state: every panel has to ask "which scan falls
+# in this window", and that question caused a string of wrong answers -- a window
+# shorter than the daily scan interval was empty 18 hours a day, one exactly equal
+# to it went blank while a scan ran, and a wider one needed deduplication. Logs
+# also drop oversized lines at ingest silently, which had been discarding the
+# images with the MOST vulnerabilities.
+#
+# Metrics carry last-value semantics, so none of that applies. Roughly 850 series
+# for ~120 images. Empty disables publishing; the log reports are unaffected
+# either way and remain the system of record.
+metricsEndpoint: ""
 
 excludeNamespaces: ""
 
