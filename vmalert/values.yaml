@@ -99,6 +99,47 @@ server:
             severity: critical
           annotations:
             summary: "Node {{ $labels.node }} is not ready"
+      # Staleness — the failure mode where nothing crashes and nothing syncs
+      # wrong, and a scheduled job simply stops succeeding. Pod health and
+      # ArgoCD sync status both stay green through it, because the workload is
+      # not what failed; the job runs, exits non-zero, and is collected. Nothing
+      # else in this ruleset looks at whether a CronJob is actually completing.
+      - name: backups
+        rules:
+        # The threshold is 2.5x each job's OWN period, derived from its schedule,
+        # so a daily job alerts after ~2 missed days and the weekly news-digest
+        # after ~2 missed weeks. Suspended jobs (vrestic-thorix) have no
+        # next_schedule_time series and drop out of the join automatically, so
+        # there is no allowlist to keep in step.
+        #
+        # The scalar MUST sit inside the parentheses. Written the other way, as
+        # `2.5 * on(namespace, cronjob) (...)`, the whole expression silently
+        # returns nothing — on() cannot modify a scalar operand. That form was
+        # written first and validated at 0 series, which reads identically to
+        # "everything is healthy". A rule that can never fire, guarding against
+        # things that never fire. Verified by re-running with a ~0 threshold and
+        # confirming all 12 active jobs matched.
+        - alert: CronJobStale
+          expr: (time() - kube_cronjob_status_last_successful_time) > on(namespace, cronjob) (2.5 * (kube_cronjob_next_schedule_time - on(namespace, cronjob) kube_cronjob_status_last_schedule_time))
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not succeeded in 2.5+ of its own schedule periods"
+            description: "Last success is stale relative to this job's own schedule. Read the most recent pod logs before assuming the workload is at fault: the cause is usually outside it — a missing mount, a stale lock left by a killed run, or an unreachable remote."
+        # A job that has NEVER succeeded has no last_successful_time series at
+        # all, so CronJobStale cannot fire for it — the metric it subtracts from
+        # does not exist. A never-succeeded job and a perfectly healthy one both
+        # produce zero rows from a staleness rule, which is why this needs to be
+        # a separate check rather than a looser threshold on the first one.
+        - alert: CronJobNeverSucceeded
+          expr: kube_cronjob_next_schedule_time unless on(namespace, cronjob) kube_cronjob_status_last_successful_time
+          for: 48h
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has never recorded a successful run"
+            description: "Scheduled, not suspended, and no success has ever been recorded. Staleness rules are blind to this case because there is no timestamp to compare against."
       - name: storage
         rules:
         - alert: PVCUsageHigh
