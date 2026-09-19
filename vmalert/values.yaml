@@ -527,6 +527,13 @@ alertmanager:
         title: "{{ .Status | toUpper }} | {{ .CommonLabels.alertname }}"
         text: "{{ range .Alerts }}*{{ .Annotations.summary }}*\n{{ .Annotations.description }}\n{{ end }}"
         send_resolved: true
+    # HolmesGPT root-cause investigation for critical alerts (holmes-alert-relay).
+    # Investigations are slow (local 32B) so this only receives critical alerts;
+    # the relay de-dups and posts findings to Slack itself.
+    - name: holmes-relay
+      webhook_configs:
+      - url: http://holmes-alert-relay-simple-service.victoriametrics.svc:8080/alert
+        send_resolved: false
     route:
       receiver: slack-warning
       group_by:
@@ -536,6 +543,12 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+      # Critical alerts ALSO go to Holmes for investigation; continue:true so
+      # they still fall through to slack-critical below (existing alerting intact).
+      - receiver: holmes-relay
+        matchers:
+        - severity = critical
+        continue: true
       - receiver: slack-critical
         matchers:
         - severity = critical
