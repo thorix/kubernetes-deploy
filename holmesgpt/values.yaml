@@ -3,10 +3,10 @@
 # Uses local Ollama for LLM inference (no external API calls)
 
 logLevel: INFO
-# Scaled to 0 -- not yet providing enough value to justify the footprint, and
-# the operator was unstable under its configured memory limit. Set back to 1
-# to re-enable.
-replicas: 0
+# The Holmes API server, used on demand for interactive and alert-triggered
+# investigations. The scheduled-check `operator` below stays disabled — it was
+# unstable at its memory limit and on-demand use does not need it.
+replicas: 1
 
 # Disable telemetry
 sentryDSN: ""
