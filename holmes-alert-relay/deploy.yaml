@@ -1,0 +1,6 @@
+namespace: victoriametrics
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../holmes-alert-relay/values.yaml
