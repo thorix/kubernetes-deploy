@@ -77,8 +77,12 @@ def _prompt_for(alert: dict) -> str:
         f"A Kubernetes alert '{name}'{where} is firing. Details: {summary}\n"
         f"Alert labels: {json.dumps(labels)}\n"
         "Investigate the root cause using pod status, recent events, logs, and "
-        "relevant Prometheus metrics. Give a concise root-cause analysis and the "
-        "single most useful remediation step. If it is a false alarm, say so."
+        "relevant Prometheus metrics.\n\n"
+        "Respond with a SHORT answer for a Slack message (at most ~6 sentences): "
+        "one line naming the most likely root cause, a couple of supporting facts, "
+        "and one concrete next action. Write plain prose only — do NOT include raw "
+        "tool output, log excerpts, counts, timestamps, or section headings. If the "
+        "available data is insufficient to determine a cause, say so in one line."
     )
 
 
@@ -90,8 +94,14 @@ def _investigate(alert: dict) -> None:
     log.info("investigating alert=%s ns=%s fp=%s", name, ns, alert.get("fingerprint"))
     header = f":mag: *Holmes root-cause* for `{name}`" + (f" in `{ns}`" if ns else "")
     try:
-        raw = _post_json(HOLMES_URL, {"ask": _prompt_for(alert), "stream": False}, timeout=HOLMES_TIMEOUT)
-        analysis = (json.loads(raw).get("analysis") or "").strip() or "(Holmes returned no analysis)"
+        prompt = _prompt_for(alert)
+        raw = _post_json(HOLMES_URL, {"ask": prompt, "stream": False}, timeout=HOLMES_TIMEOUT)
+        analysis = (json.loads(raw).get("analysis") or "").strip()
+        if not analysis:  # the local model occasionally returns an empty analysis
+            log.info("empty analysis for %s; retrying once", name)
+            raw = _post_json(HOLMES_URL, {"ask": prompt, "stream": False}, timeout=HOLMES_TIMEOUT)
+            analysis = (json.loads(raw).get("analysis") or "").strip()
+        analysis = analysis or "(Holmes returned no analysis after a retry)"
     except Exception as exc:  # noqa: BLE001
         log.error("holmes investigation failed for %s: %s", name, exc)
         _slack(f"{header}\n:warning: investigation failed: `{exc}`")
@@ -111,7 +121,13 @@ def _worker() -> None:
 
 
 def _enqueue(alert: dict) -> str:
-    fp = alert.get("fingerprint") or json.dumps(alert.get("labels", {}), sort_keys=True)
+    labels = alert.get("labels", {}) or {}
+    # De-dup by alert IDENTITY (alertname+namespace), NOT fingerprint. A
+    # crashlooping pod gets a new pod name on every restart, which changes the
+    # fingerprint — so fingerprint de-dup would re-investigate the same problem
+    # every ~restart. Identity de-dup investigates each distinct problem once
+    # per DEDUP window.
+    fp = labels.get("alertname", "?") + "/" + labels.get("namespace", "")
     now = time.time()
     with _seen_lock:
         last = _seen.get(fp, 0)
