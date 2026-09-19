@@ -293,13 +293,17 @@ networkPolicy:
             rules:
               dns:
                 - matchPattern: "*"
-      # HolmesGPT API (cross-namespace).
+      # HolmesGPT API (cross-namespace). Cilium enforces egress on the BACKEND
+      # pod port (5050), not the Service port (80), so allow 5050 (80 kept for
+      # completeness).
       - toEndpoints:
           - matchLabels:
               k8s:io.kubernetes.pod.namespace: holmesgpt
         toPorts:
           - ports:
               - port: "80"
+                protocol: TCP
+              - port: "5050"
                 protocol: TCP
       # Slack incoming webhook.
       - toFQDNs:
