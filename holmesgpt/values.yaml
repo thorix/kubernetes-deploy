@@ -46,8 +46,10 @@ additionalEnvVars:
       key: MCP_GATEWAY_TOKEN
 
 modelList:
-  ollama-qwen25:
-    model: "ollama_chat/qwen2.5:32b"
+  # Trialing qwen3:30b-a3b (MoE, ~3B active) for faster, more consistent agentic
+  # investigations on bock's Strix Halo APU vs the dense qwen2.5:32b.
+  ollama-qwen3:
+    model: "ollama_chat/qwen3:30b-a3b"
     temperature: 0
 
 # MCP Gateway - provides ArgoCD, OPNsense, and Haystack RAG tools
