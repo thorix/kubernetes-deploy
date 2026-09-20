@@ -82,7 +82,12 @@ def _prompt_for(alert: dict) -> str:
         "one line naming the most likely root cause, a couple of supporting facts, "
         "and one concrete next action. Write plain prose only — do NOT include raw "
         "tool output, log excerpts, counts, timestamps, or section headings. If the "
-        "available data is insufficient to determine a cause, say so in one line."
+        "available data is insufficient to determine a cause, say so in one line.\n\n"
+        "IMPORTANT: if a tool query returns no results or errors, treat that data as "
+        "UNAVAILABLE, not as evidence of absence. Do NOT conclude that a resource "
+        "(pod, deployment, etc.) is missing, deleted, or does not exist unless a "
+        "successful query explicitly confirms it — otherwise say the data could not "
+        "be retrieved."
     )
 
 
