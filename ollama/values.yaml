@@ -10,6 +10,9 @@ image:
 server:
   host: "0.0.0.0"
   port: 11434
+  # Max context window Ollama allocates per model (overrides model defaults).
+  # Caps memory/latency for large-context models (e.g. qwen3 defaults to 256k).
+  contextLength: 65536
 
 # GPU configuration
 gpu:
