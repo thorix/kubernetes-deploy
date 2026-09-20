@@ -31,6 +31,13 @@ spec:
         env:
         - name: OLLAMA_HOST
           value: "{{ .Values.server.host }}:{{ .Values.server.port }}"
+        {{- if .Values.server.contextLength }}
+        # Cap the context window (models like qwen3 default to 256k, which
+        # inflates KV-cache memory + slows inference). This is plenty for agentic
+        # callers whose prompts run tens of thousands of tokens.
+        - name: OLLAMA_CONTEXT_LENGTH
+          value: "{{ .Values.server.contextLength }}"
+        {{- end }}
         {{- if and .Values.gpu.enabled .Values.gpu.driMount }}
         - name: OLLAMA_VULKAN
           value: "1"
