@@ -528,12 +528,13 @@ alertmanager:
         text: "{{ range .Alerts }}*{{ .Annotations.summary }}*\n{{ .Annotations.description }}\n{{ end }}"
         send_resolved: true
     # HolmesGPT root-cause investigation for critical alerts (holmes-alert-relay).
-    # Investigations are slow (local 32B) so this only receives critical alerts;
-    # the relay de-dups and posts findings to Slack itself.
+    # Investigations are slow (local model) so this only receives critical alerts;
+    # the relay de-dups and files findings as Vikunja tasks. send_resolved:true so
+    # the relay also sees resolved alerts and closes the corresponding task.
     - name: holmes-relay
       webhook_configs:
       - url: http://holmes-alert-relay-simple-service.victoriametrics.svc:8080/alert
-        send_resolved: false
+        send_resolved: true
     route:
       receiver: slack-warning
       group_by:
