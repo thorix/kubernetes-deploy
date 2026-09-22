@@ -1,9 +1,11 @@
-# holmes-alert-relay: Alertmanager -> HolmesGPT -> Slack for CRITICAL alerts.
+# holmes-alert-relay: Alertmanager -> HolmesGPT -> Vikunja for CRITICAL alerts.
 # The stdlib relay (mounted from a ConfigMap) runs on python:3.12-slim. It lives
-# in the victoriametrics namespace to reuse the vmalert-slack webhook secret and
-# sit next to Alertmanager. Investigations run one-at-a-time (the 32B model is
-# slow) and are critical-only + de-duped by alertname+namespace; the existing
-# Alertmanager->Slack path is untouched and fires independently.
+# in the victoriametrics namespace to sit next to Alertmanager. Investigations
+# run one-at-a-time (the local model is slow) and are critical-only + de-duped by
+# alertname+namespace. Holmes root-causes are filed as Vikunja tasks (one task
+# per distinct problem; commented on recurrence; closed when the alert resolves)
+# so chronic issues are tracked work-items rather than repeated Slack messages.
+# The existing raw Alertmanager->Slack pager is untouched and fires independently.
 workloadType: Deployment
 replicaCount: 1
 
@@ -27,11 +29,19 @@ env:
     value: "900"
   - name: PORT
     value: "8080"
-  - name: SLACK_WEBHOOK_URL
+  # Vikunja API base + the "Cluster Alerts" project (id 8) tasks are filed into.
+  - name: VIKUNJA_URL
+    value: "http://vikunja-simple-service.vikunja.svc:3456/api/v1"
+  - name: VIKUNJA_PROJECT_ID
+    value: "8"
+  # Long-lived Vikunja API token. NOTE: this secret (holmes-relay-vikunja) is
+  # created manually, out of GitOps — it holds a personal API token that is not in
+  # Vault. Re-create it if the namespace is rebuilt. (Vault-ify as a follow-up.)
+  - name: VIKUNJA_TOKEN
     valueFrom:
       secretKeyRef:
-        name: vmalert-slack
-        key: SLACK_WEBHOOK_URL
+        name: holmes-relay-vikunja
+        key: VIKUNJA_TOKEN
 
 configMap:
   enabled: true
@@ -39,25 +49,30 @@ configMap:
   files:
     relay.py: |
       #!/usr/bin/env python3
-      """Alertmanager -> HolmesGPT -> Slack relay.
+      """Alertmanager -> HolmesGPT -> Vikunja relay.
 
-      Alertmanager POSTs firing alerts to /alert. For each firing alert whose
-      severity is in RELAY_SEVERITIES, this asks HolmesGPT to investigate the root
-      cause and posts the result to a Slack incoming webhook.
+      Alertmanager POSTs alerts to /alert. For each *firing* alert whose severity is
+      in RELAY_SEVERITIES, this asks HolmesGPT to investigate the root cause and files
+      it as a task in a Vikunja project — ONE task per distinct problem
+      (alertname+namespace), so a chronic issue is a single tracked ticket rather than
+      a stream of Slack messages. When the alert *resolves*, the task is closed.
 
-      Design notes:
-      - HolmesGPT on the local 32B model takes ~7-8 min per investigation, so this
-        runs ONE investigation at a time (a single worker draining a bounded queue),
-        and de-dups by alert fingerprint for DEDUP_MINUTES so a flapping/repeating
-        alert isn't investigated over and over.
-      - stdlib only (no pip deps) so it runs directly on python:3.12-slim from a
-        ConfigMap, no image build.
-      - The raw Alertmanager->Slack alert still fires independently and instantly;
-        this only adds a slower root-cause follow-up. If Holmes is down/slow, the
-        alerting path is unaffected.
+      Why tickets, not Slack: a Holmes root-cause is actionable work, and chronic
+      alerts (a pod OOMing for days) should be one item you track to done, not a
+      message re-posted every couple hours. The raw Alertmanager->Slack path still
+      fires independently as the real-time pager; this is the durable work-item side.
+
+      Design:
+      - Investigations are slow (local model), so ONE runs at a time (a single worker
+        draining a bounded queue), de-duped by alertname+namespace for DEDUP_MINUTES.
+      - Task lifecycle: first firing -> create task with the root cause; a later
+        firing while the task is still open -> add a comment (so you can see it's
+        chronic); resolved -> mark the task done.
+      - stdlib only (runs on python:3.12-slim from a ConfigMap; no image build).
       """
       from __future__ import annotations
 
+      import html
       import json
       import logging
       import os
@@ -71,44 +86,54 @@ configMap:
       log = logging.getLogger("relay")
 
       HOLMES_URL = os.environ.get("HOLMES_URL", "http://holmesgpt-holmes.holmesgpt.svc/api/chat")
-      SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
-      SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "")  # optional override; webhook has a default
+      HOLMES_TIMEOUT = int(os.environ.get("HOLMES_TIMEOUT", "900"))  # seconds; local model is slow
       RELAY_SEVERITIES = {s.strip().lower() for s in os.environ.get("RELAY_SEVERITIES", "critical").split(",") if s.strip()}
-      DEDUP_MINUTES = int(os.environ.get("DEDUP_MINUTES", "30"))
-      HOLMES_TIMEOUT = int(os.environ.get("HOLMES_TIMEOUT", "900"))  # seconds; 32B is slow
+      DEDUP_MINUTES = int(os.environ.get("DEDUP_MINUTES", "120"))
+
+      VIKUNJA_URL = os.environ.get("VIKUNJA_URL", "http://vikunja-simple-service.vikunja.svc:3456/api/v1")
+      VIKUNJA_TOKEN = os.environ.get("VIKUNJA_TOKEN", "")
+      VIKUNJA_PROJECT_ID = os.environ.get("VIKUNJA_PROJECT_ID", "8")
+
       MAX_QUEUE = int(os.environ.get("MAX_QUEUE", "20"))
       PORT = int(os.environ.get("PORT", "8080"))
 
       _work: "queue.Queue[dict]" = queue.Queue(maxsize=MAX_QUEUE)
-      _seen: dict[str, float] = {}          # fingerprint -> last-enqueued epoch
+      _seen: dict[str, float] = {}          # dedup key -> last-enqueued epoch
       _seen_lock = threading.Lock()
 
 
+      # ── HTTP helpers ─────────────────────────────────────────────────────────────
+
       def _post_json(url: str, payload: dict, timeout: int) -> str:
-          data = json.dumps(payload).encode()
-          req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+          req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                       headers={"Content-Type": "application/json"}, method="POST")
           with urllib.request.urlopen(req, timeout=timeout) as resp:
               return resp.read().decode("utf-8", "replace")
 
 
-      def _slack(text: str) -> None:
-          if not SLACK_WEBHOOK_URL:
-              log.warning("no SLACK_WEBHOOK_URL set; would have posted:\n%s", text[:500])
-              return
-          payload: dict = {"text": text}
-          if SLACK_CHANNEL:
-              payload["channel"] = SLACK_CHANNEL
-          try:
-              _post_json(SLACK_WEBHOOK_URL, payload, timeout=15)
-          except Exception as exc:  # noqa: BLE001 - never let Slack failure kill the worker
-              log.error("slack post failed: %s", exc)
+      def _vk(method: str, path: str, payload: dict | None = None):
+          """Call the Vikunja API. Returns parsed JSON (or {}). Raises on HTTP error."""
+          data = json.dumps(payload).encode() if payload is not None else None
+          req = urllib.request.Request(
+              VIKUNJA_URL + path, data=data, method=method,
+              headers={"Authorization": "Bearer " + VIKUNJA_TOKEN, "Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(req, timeout=25) as resp:
+              body = resp.read().decode("utf-8", "replace")
+              return json.loads(body) if body.strip() else {}
+
+
+      # ── Alert -> Holmes ──────────────────────────────────────────────────────────
+
+      def _identity(alert: dict) -> tuple[str, str]:
+          labels = alert.get("labels", {}) or {}
+          return labels.get("alertname", "?"), labels.get("namespace", "")
 
 
       def _prompt_for(alert: dict) -> str:
+          name, ns = _identity(alert)
           labels = alert.get("labels", {}) or {}
           ann = alert.get("annotations", {}) or {}
-          name = labels.get("alertname", "unknown")
-          ns = labels.get("namespace", "")
           obj = labels.get("pod") or labels.get("deployment") or labels.get("statefulset") or labels.get("instance") or ""
           where = f" in namespace '{ns}'" if ns else ""
           where += f" for '{obj}'" if obj else ""
@@ -118,42 +143,103 @@ configMap:
               f"Alert labels: {json.dumps(labels)}\n"
               "Investigate the root cause using pod status, recent events, logs, and "
               "relevant Prometheus metrics.\n\n"
-              "Respond with a SHORT answer for a Slack message (at most ~6 sentences): "
-              "one line naming the most likely root cause, a couple of supporting facts, "
-              "and one concrete next action. Write plain prose only — do NOT include raw "
-              "tool output, log excerpts, counts, timestamps, or section headings. If the "
-              "available data is insufficient to determine a cause, say so in one line.\n\n"
-              "IMPORTANT: if a tool query returns no results or errors, treat that data as "
-              "UNAVAILABLE, not as evidence of absence. Do NOT conclude that a resource "
-              "(pod, deployment, etc.) is missing, deleted, or does not exist unless a "
-              "successful query explicitly confirms it — otherwise say the data could not "
-              "be retrieved."
+              "Respond with a SHORT answer (at most ~6 sentences): one line naming the "
+              "most likely root cause, a couple of supporting facts, and one concrete "
+              "next action. Write plain prose only — do NOT include raw tool output, log "
+              "excerpts, counts, timestamps, or section headings. If the available data "
+              "is insufficient to determine a cause, say so in one line.\n\n"
+              "IMPORTANT: if a tool query returns no results or errors, treat that data "
+              "as UNAVAILABLE, not as evidence of absence. Do NOT conclude that a "
+              "resource (pod, deployment, etc.) is missing, deleted, or does not exist "
+              "unless a successful query explicitly confirms it — otherwise say the data "
+              "could not be retrieved."
           )
 
 
-      def _investigate(alert: dict) -> None:
-          labels = alert.get("labels", {}) or {}
-          name = labels.get("alertname", "unknown")
-          ns = labels.get("namespace", "")
-          started = time.time()
-          log.info("investigating alert=%s ns=%s fp=%s", name, ns, alert.get("fingerprint"))
-          header = f":mag: *Holmes root-cause* for `{name}`" + (f" in `{ns}`" if ns else "")
-          try:
-              prompt = _prompt_for(alert)
+      def _ask_holmes(alert: dict) -> str:
+          prompt = _prompt_for(alert)
+          raw = _post_json(HOLMES_URL, {"ask": prompt, "stream": False}, timeout=HOLMES_TIMEOUT)
+          analysis = (json.loads(raw).get("analysis") or "").strip()
+          if not analysis:  # the local model occasionally returns an empty analysis
+              log.info("empty analysis; retrying once")
               raw = _post_json(HOLMES_URL, {"ask": prompt, "stream": False}, timeout=HOLMES_TIMEOUT)
               analysis = (json.loads(raw).get("analysis") or "").strip()
-              if not analysis:  # the local model occasionally returns an empty analysis
-                  log.info("empty analysis for %s; retrying once", name)
-                  raw = _post_json(HOLMES_URL, {"ask": prompt, "stream": False}, timeout=HOLMES_TIMEOUT)
-                  analysis = (json.loads(raw).get("analysis") or "").strip()
-              analysis = analysis or "(Holmes returned no analysis after a retry)"
+          return analysis or "(Holmes returned no analysis after a retry)"
+
+
+      # ── Vikunja task lifecycle ───────────────────────────────────────────────────
+
+      def _task_title(alert: dict) -> str:
+          name, ns = _identity(alert)
+          return f"[alert] {name}" + (f" — {ns}" if ns else "")
+
+
+      def _find_open_task(title: str) -> dict | None:
+          try:
+              tasks = _vk("GET", f"/projects/{VIKUNJA_PROJECT_ID}/tasks?per_page=100&filter_include_nulls=false")
+          except Exception as exc:  # noqa: BLE001
+              log.error("vikunja list failed: %s", exc)
+              return None
+          for t in tasks or []:
+              if t.get("title") == title and not t.get("done"):
+                  return t
+          return None
+
+
+      def _description(alert: dict, analysis: str) -> str:
+          name, ns = _identity(alert)
+          ann = alert.get("annotations", {}) or {}
+          summary = ann.get("summary") or ann.get("description") or ""
+          parts = [f"<p><b>Alert:</b> {html.escape(name)}" + (f" in <code>{html.escape(ns)}</code>" if ns else "") + "</p>"]
+          if summary:
+              parts.append(f"<p><b>Summary:</b> {html.escape(summary)}</p>")
+          parts.append("<p><b>HolmesGPT root cause:</b><br>" + html.escape(analysis).replace("\n", "<br>") + "</p>")
+          parts.append("<p><i>Auto-filed by holmes-alert-relay; closes when the alert resolves.</i></p>")
+          return "".join(parts)
+
+
+      def _upsert_task(alert: dict, analysis: str) -> None:
+          title = _task_title(alert)
+          existing = _find_open_task(title)
+          if existing:
+              comment = "<p><b>Still firing.</b> Latest HolmesGPT diagnosis:<br>" + \
+                        html.escape(analysis).replace("\n", "<br>") + "</p>"
+              _vk("PUT", f"/tasks/{existing['id']}/comments", {"comment": comment})
+              log.info("commented on task %s (%s)", existing["id"], title)
+          else:
+              t = _vk("PUT", f"/projects/{VIKUNJA_PROJECT_ID}/tasks",
+                      {"title": title, "description": _description(alert, analysis)})
+              log.info("created task %s (%s)", (t or {}).get("id"), title)
+
+
+      def _close_task(alert: dict) -> None:
+          title = _task_title(alert)
+          t = _find_open_task(title)
+          if not t:
+              return
+          try:
+              _vk("POST", f"/tasks/{t['id']}", {"id": t["id"], "done": True})
+              log.info("closed task %s (%s) — alert resolved", t["id"], title)
+          except Exception as exc:  # noqa: BLE001
+              log.error("vikunja close failed for %s: %s", title, exc)
+
+
+      # ── Worker + queue (firing investigations) ───────────────────────────────────
+
+      def _investigate(alert: dict) -> None:
+          name, ns = _identity(alert)
+          started = time.time()
+          log.info("investigating alert=%s ns=%s", name, ns)
+          try:
+              analysis = _ask_holmes(alert)
           except Exception as exc:  # noqa: BLE001
               log.error("holmes investigation failed for %s: %s", name, exc)
-              _slack(f"{header}\n:warning: investigation failed: `{exc}`")
-              return
-          took = int(time.time() - started)
-          _slack(f"{header}  _(took {took // 60}m{took % 60:02d}s)_\n{analysis}")
-          log.info("posted analysis for alert=%s in %ss", name, took)
+              analysis = f"(HolmesGPT investigation failed: {exc})"
+          try:
+              _upsert_task(alert, analysis)
+          except Exception as exc:  # noqa: BLE001 - never let Vikunja errors kill the worker
+              log.error("vikunja upsert failed for %s: %s", name, exc)
+          log.info("done alert=%s in %ss", name, int(time.time() - started))
 
 
       def _worker() -> None:
@@ -166,19 +252,12 @@ configMap:
 
 
       def _enqueue(alert: dict) -> str:
-          labels = alert.get("labels", {}) or {}
-          # De-dup by alert IDENTITY (alertname+namespace), NOT fingerprint. A
-          # crashlooping pod gets a new pod name on every restart, which changes the
-          # fingerprint — so fingerprint de-dup would re-investigate the same problem
-          # every ~restart. Identity de-dup investigates each distinct problem once
-          # per DEDUP window.
-          fp = labels.get("alertname", "?") + "/" + labels.get("namespace", "")
+          name, ns = _identity(alert)
+          fp = f"{name}/{ns}"  # identity de-dup (fingerprint churns on pod restarts)
           now = time.time()
           with _seen_lock:
-              last = _seen.get(fp, 0)
-              if now - last < DEDUP_MINUTES * 60:
+              if now - _seen.get(fp, 0) < DEDUP_MINUTES * 60:
                   return "deduped"
-              # prune old fingerprints
               for k in [k for k, v in _seen.items() if now - v > DEDUP_MINUTES * 120]:
                   _seen.pop(k, None)
               _seen[fp] = now
@@ -191,8 +270,10 @@ configMap:
               return "queue-full"
 
 
+      # ── HTTP server ──────────────────────────────────────────────────────────────
+
       class Handler(BaseHTTPRequestHandler):
-          def log_message(self, *_a):  # quiet default access logs
+          def log_message(self, *_a):
               return
 
           def _send(self, code: int, body: str = "") -> None:
@@ -203,10 +284,7 @@ configMap:
                   self.wfile.write(body.encode())
 
           def do_GET(self):
-              if self.path == "/healthz":
-                  self._send(200, "ok")
-              else:
-                  self._send(404, "not found")
+              self._send(200, "ok") if self.path == "/healthz" else self._send(404, "not found")
 
           def do_POST(self):
               if self.path != "/alert":
@@ -218,13 +296,20 @@ configMap:
               except Exception as exc:  # noqa: BLE001
                   self._send(400, f"bad request: {exc}")
                   return
-              counts = {"queued": 0, "deduped": 0, "queue-full": 0, "skipped": 0}
+              counts = {"queued": 0, "deduped": 0, "queue-full": 0, "resolved": 0, "skipped": 0}
               for alert in data.get("alerts", []) or []:
                   sev = (alert.get("labels", {}) or {}).get("severity", "").lower()
-                  if alert.get("status") != "firing" or sev not in RELAY_SEVERITIES:
+                  if sev not in RELAY_SEVERITIES:
                       counts["skipped"] += 1
                       continue
-                  counts[_enqueue(alert)] += 1
+                  status = alert.get("status")
+                  if status == "firing":
+                      counts[_enqueue(alert)] += 1
+                  elif status == "resolved":
+                      _close_task(alert)      # fast (no investigation); close the tracked task
+                      counts["resolved"] += 1
+                  else:
+                      counts["skipped"] += 1
               log.info("webhook: %s (qsize=%d)", counts, _work.qsize())
               self._send(200, json.dumps(counts))
 
@@ -232,8 +317,9 @@ configMap:
       def main() -> None:
           threading.Thread(target=_worker, daemon=True).start()
           log.info(
-              "relay up on :%d holmes=%s severities=%s dedup=%dm slack=%s",
-              PORT, HOLMES_URL, sorted(RELAY_SEVERITIES), DEDUP_MINUTES, "set" if SLACK_WEBHOOK_URL else "MISSING",
+              "relay up on :%d holmes=%s severities=%s dedup=%dm vikunja=%s project=%s token=%s",
+              PORT, HOLMES_URL, sorted(RELAY_SEVERITIES), DEDUP_MINUTES, VIKUNJA_URL,
+              VIKUNJA_PROJECT_ID, "set" if VIKUNJA_TOKEN else "MISSING",
           )
           ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
@@ -326,10 +412,11 @@ networkPolicy:
                 protocol: TCP
               - port: "5050"
                 protocol: TCP
-      # Slack incoming webhook.
-      - toFQDNs:
-          - matchName: hooks.slack.com
+      # Vikunja API (cross-namespace). Service port == backend pod port 3456.
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: vikunja
         toPorts:
           - ports:
-              - port: "443"
+              - port: "3456"
                 protocol: TCP
