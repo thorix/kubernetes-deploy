@@ -493,7 +493,13 @@ server:
             summary: "ZFS {{ $labels.type }} errors rising on {{ $labels.pool }} vdev {{ $labels.vdev }}"
             description: "Up by {{ $value }} in 24h on {{ $labels.instance }}. Note these counters reset on 'zpool clear' and on import, so this is since the last clear."
         - alert: DiskMetricsExporterDown
-          expr: up{job=~"(red|oatmeal)-(node|smart)"} == 0
+          # Selected by what a job EXPOSES, not by hostname: naming hosts here both
+          # leaked real node names into this public repo and silently failed to
+          # cover any host added later. ".+-smart" is exactly the SMART exporters;
+          # the second clause is any job that reported ZFS in the last 24h, which
+          # distinguishes the ZFS hosts from other "-node" jobs that have no disks
+          # to report. max_over_time keeps the set stable once the target is down.
+          expr: (up{job=~".+-smart"} == 0) or (up == 0 and on(job) (count by (job) (max_over_time(node_zfs_zpool_state[24h])) > 0))
           for: 15m
           labels:
             severity: warning

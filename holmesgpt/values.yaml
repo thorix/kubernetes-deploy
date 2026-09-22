@@ -47,7 +47,7 @@ additionalEnvVars:
 
 modelList:
   # Trialing qwen3:30b-a3b (MoE, ~3B active) for faster, more consistent agentic
-  # investigations on bock's Strix Halo APU vs the dense qwen2.5:32b.
+  # investigations on the Strix Halo APU node vs the dense qwen2.5:32b.
   ollama-qwen3:
     model: "ollama_chat/qwen3:30b-a3b"
     temperature: 0

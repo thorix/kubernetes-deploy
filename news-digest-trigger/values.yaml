@@ -6,7 +6,7 @@
 workloadType: CronJob
 
 image:
-  repository: harbor.thorix.io/library/news-digest
+  repository: harbor.lan/library/news-digest
   tag: "v0.1.2"
   pullPolicy: IfNotPresent
 

@@ -28,3 +28,6 @@ grafana/charts/
 # Backups
 *.bak
 *.orig
+
+# Python bytecode from scripts/ unit tests
+__pycache__/

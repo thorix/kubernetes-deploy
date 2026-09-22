@@ -29,6 +29,14 @@ env:
     value: "900"
   - name: PORT
     value: "8080"
+  # A resolved alert closes its task only after staying resolved this long; a
+  # firing in the window cancels the close, so a flapping alert never churns.
+  - name: CLOSE_GRACE_MINUTES
+    value: "10"
+  # A problem firing again after its task closed reopens that task (rather than
+  # making a new one) if it closed within this many hours.
+  - name: REOPEN_WINDOW_HOURS
+    value: "24"
   # Vikunja API base + the "Cluster Alerts" project (id 8) tasks are filed into.
   - name: VIKUNJA_URL
     value: "http://vikunja-simple-service.vikunja.svc:3456/api/v1"
@@ -65,9 +73,15 @@ configMap:
       Design:
       - Investigations are slow (local model), so ONE runs at a time (a single worker
         draining a bounded queue), de-duped by alertname+namespace for DEDUP_MINUTES.
-      - Task lifecycle: first firing -> create task with the root cause; a later
-        firing while the task is still open -> add a comment (so you can see it's
-        chronic); resolved -> mark the task done.
+      - Task lifecycle (one task per alertname+namespace):
+          * first firing            -> create task with the root cause
+          * fires again while open   -> add a comment (so you can see it's chronic)
+          * fires again after close  -> reopen the same task if it closed within
+                                        REOPEN_WINDOW_HOURS, else a fresh task
+          * resolved                 -> arm a close; the reaper closes the task only
+                                        after CLOSE_GRACE_MINUTES of staying resolved,
+                                        and any firing in that window cancels it (so a
+                                        flapping alert never churns tickets).
       - stdlib only (runs on python:3.12-slim from a ConfigMap; no image build).
       """
       from __future__ import annotations
@@ -80,6 +94,7 @@ configMap:
       import threading
       import time
       import urllib.request
+      from datetime import datetime, timezone
       from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
       logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -94,12 +109,26 @@ configMap:
       VIKUNJA_TOKEN = os.environ.get("VIKUNJA_TOKEN", "")
       VIKUNJA_PROJECT_ID = os.environ.get("VIKUNJA_PROJECT_ID", "8")
 
+      # A resolved alert does not close its task immediately: it arms a pending close
+      # that the reaper acts on only after the problem has stayed resolved this long.
+      # Any firing in the window cancels it, so a flapping alert never churns tickets.
+      CLOSE_GRACE_MINUTES = int(os.environ.get("CLOSE_GRACE_MINUTES", "10"))
+      # When a problem fires again after its task was closed, reopen that task (instead
+      # of creating a new one) if it was closed within this many hours. Beyond the
+      # window, a recurrence gets a fresh ticket with its own investigation history.
+      REOPEN_WINDOW_HOURS = int(os.environ.get("REOPEN_WINDOW_HOURS", "24"))
+
       MAX_QUEUE = int(os.environ.get("MAX_QUEUE", "20"))
       PORT = int(os.environ.get("PORT", "8080"))
 
       _work: "queue.Queue[dict]" = queue.Queue(maxsize=MAX_QUEUE)
       _seen: dict[str, float] = {}          # dedup key -> last-enqueued epoch
       _seen_lock = threading.Lock()
+      # identity key -> (close-deadline epoch, task title). A resolved alert arms an
+      # entry here; a firing cancels it; the reaper closes the task once the deadline
+      # passes. Guarded by _pending_lock.
+      _pending_close: dict[str, tuple[float, str]] = {}
+      _pending_lock = threading.Lock()
 
 
       # ── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -174,16 +203,39 @@ configMap:
           return f"[alert] {name}" + (f" — {ns}" if ns else "")
 
 
-      def _find_open_task(title: str) -> dict | None:
+      def _ident_key(alert: dict) -> str:
+          name, ns = _identity(alert)
+          return f"{name}/{ns}"
+
+
+      def _find_tasks(title: str) -> tuple[dict | None, dict | None]:
+          """Return (open task, most-recently-closed task) matching this title.
+
+          Vikunja's project task list includes done tasks, so one call finds both.
+          """
           try:
               tasks = _vk("GET", f"/projects/{VIKUNJA_PROJECT_ID}/tasks?per_page=100&filter_include_nulls=false")
           except Exception as exc:  # noqa: BLE001
               log.error("vikunja list failed: %s", exc)
-              return None
+              return None, None
+          open_t: dict | None = None
+          closed_t: dict | None = None
           for t in tasks or []:
-              if t.get("title") == title and not t.get("done"):
-                  return t
-          return None
+              if t.get("title") != title:
+                  continue
+              if not t.get("done"):
+                  open_t = open_t or t
+              elif closed_t is None or (t.get("done_at") or "") > (closed_t.get("done_at") or ""):
+                  closed_t = t  # done_at is RFC3339 Z, so string compare orders by time
+          return open_t, closed_t
+
+
+      def _within_reopen_window(task: dict) -> bool:
+          try:
+              dt = datetime.fromisoformat((task.get("done_at") or "").replace("Z", "+00:00"))
+          except ValueError:
+              return False
+          return (datetime.now(timezone.utc) - dt).total_seconds() <= REOPEN_WINDOW_HOURS * 3600
 
 
       def _description(alert: dict, analysis: str) -> str:
@@ -198,30 +250,76 @@ configMap:
           return "".join(parts)
 
 
+      def _analysis_html(analysis: str) -> str:
+          return html.escape(analysis).replace("\n", "<br>")
+
+
       def _upsert_task(alert: dict, analysis: str) -> None:
           title = _task_title(alert)
-          existing = _find_open_task(title)
-          if existing:
-              comment = "<p><b>Still firing.</b> Latest HolmesGPT diagnosis:<br>" + \
-                        html.escape(analysis).replace("\n", "<br>") + "</p>"
-              _vk("PUT", f"/tasks/{existing['id']}/comments", {"comment": comment})
-              log.info("commented on task %s (%s)", existing["id"], title)
-          else:
-              t = _vk("PUT", f"/projects/{VIKUNJA_PROJECT_ID}/tasks",
-                      {"title": title, "description": _description(alert, analysis)})
-              log.info("created task %s (%s)", (t or {}).get("id"), title)
-
-
-      def _close_task(alert: dict) -> None:
-          title = _task_title(alert)
-          t = _find_open_task(title)
-          if not t:
+          open_t, closed_t = _find_tasks(title)
+          if open_t:
+              _vk("PUT", f"/tasks/{open_t['id']}/comments",
+                  {"comment": "<p><b>Still firing.</b> Latest HolmesGPT diagnosis:<br>"
+                              + _analysis_html(analysis) + "</p>"})
+              log.info("commented on task %s (%s)", open_t["id"], title)
               return
+          if closed_t and _within_reopen_window(closed_t):
+              tid = closed_t["id"]
+              _vk("POST", f"/tasks/{tid}", {"id": tid, "done": False})  # reopen
+              _vk("PUT", f"/tasks/{tid}/comments",
+                  {"comment": "<p><b>Alert refired — reopened.</b> Latest HolmesGPT diagnosis:<br>"
+                              + _analysis_html(analysis) + "</p>"})
+              log.info("reopened task %s (%s)", tid, title)
+              return
+          t = _vk("PUT", f"/projects/{VIKUNJA_PROJECT_ID}/tasks",
+                  {"title": title, "description": _description(alert, analysis)})
+          log.info("created task %s (%s)", (t or {}).get("id"), title)
+
+
+      # ── Grace-period close (reaper) ──────────────────────────────────────────────
+
+      def _schedule_close(alert: dict) -> None:
+          key, title = _ident_key(alert), _task_title(alert)
+          with _pending_lock:
+              if key in _pending_close:
+                  return  # already armed; grace counts from the first resolve
+              _pending_close[key] = (time.time() + CLOSE_GRACE_MINUTES * 60, title)
+          log.info("scheduled close of '%s' in %dm (alert resolved)", title, CLOSE_GRACE_MINUTES)
+
+
+      def _cancel_pending_close(alert: dict) -> None:
+          key = _ident_key(alert)
+          with _pending_lock:
+              if _pending_close.pop(key, None):
+                  log.info("cancelled pending close of '%s' (still firing)", key)
+
+
+      def _close_task_by_title(title: str) -> None:
+          open_t, _ = _find_tasks(title)
+          if not open_t:
+              return  # nothing open to close (already closed, or never created)
           try:
-              _vk("POST", f"/tasks/{t['id']}", {"id": t["id"], "done": True})
-              log.info("closed task %s (%s) — alert resolved", t["id"], title)
+              _vk("POST", f"/tasks/{open_t['id']}", {"id": open_t["id"], "done": True})
+              log.info("closed task %s (%s) — alert stayed resolved", open_t["id"], title)
           except Exception as exc:  # noqa: BLE001
               log.error("vikunja close failed for %s: %s", title, exc)
+
+
+      def _reaper() -> None:
+          while True:
+              time.sleep(30)
+              now = time.time()
+              due: list[str] = []
+              with _pending_lock:
+                  for key, (deadline, title) in list(_pending_close.items()):
+                      if now >= deadline:
+                          _pending_close.pop(key, None)
+                          due.append(title)
+              for title in due:
+                  try:
+                      _close_task_by_title(title)
+                  except Exception as exc:  # noqa: BLE001 - never let the reaper die
+                      log.error("reaper close failed for %s: %s", title, exc)
 
 
       # ── Worker + queue (firing investigations) ───────────────────────────────────
@@ -304,9 +402,10 @@ configMap:
                       continue
                   status = alert.get("status")
                   if status == "firing":
+                      _cancel_pending_close(alert)  # problem is back; don't let it close
                       counts[_enqueue(alert)] += 1
                   elif status == "resolved":
-                      _close_task(alert)      # fast (no investigation); close the tracked task
+                      _schedule_close(alert)        # arm a grace-period close (reaper acts)
                       counts["resolved"] += 1
                   else:
                       counts["skipped"] += 1
@@ -316,10 +415,11 @@ configMap:
 
       def main() -> None:
           threading.Thread(target=_worker, daemon=True).start()
+          threading.Thread(target=_reaper, daemon=True).start()
           log.info(
-              "relay up on :%d holmes=%s severities=%s dedup=%dm vikunja=%s project=%s token=%s",
-              PORT, HOLMES_URL, sorted(RELAY_SEVERITIES), DEDUP_MINUTES, VIKUNJA_URL,
-              VIKUNJA_PROJECT_ID, "set" if VIKUNJA_TOKEN else "MISSING",
+              "relay up on :%d holmes=%s severities=%s dedup=%dm grace=%dm reopen=%dh vikunja=%s project=%s token=%s",
+              PORT, HOLMES_URL, sorted(RELAY_SEVERITIES), DEDUP_MINUTES, CLOSE_GRACE_MINUTES,
+              REOPEN_WINDOW_HOURS, VIKUNJA_URL, VIKUNJA_PROJECT_ID, "set" if VIKUNJA_TOKEN else "MISSING",
           )
           ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
