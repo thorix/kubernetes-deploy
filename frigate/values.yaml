@@ -13,7 +13,7 @@ image:
 replicaCount: 1
 
 podAnnotations:
-  configmap-hash: "20260823-frigate-0.17-tiered-record"
+  configmap-hash: "20260921-frigate-enable-detection"
 
 # Use Recreate strategy - only one instance should access recordings PVC
 strategy:

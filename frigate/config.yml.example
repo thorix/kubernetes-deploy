@@ -28,6 +28,28 @@ detectors:
 ffmpeg:
   hwaccel_args: []
 
+# Objects tracked globally. Frigate's default is ["person"] alone.
+#
+# Alerts and detections are separate review tiers. Put a label in
+# `detections.labels` to make it recorded and searchable, and in
+# `alerts.labels` only when you actually want to be told about it. A camera
+# that can see a public street should NOT alert on `car` until zones exist to
+# scope the alert to your own driveway via `required_zones` -- otherwise every
+# passing vehicle raises an alert.
+objects:
+  track:
+    - person
+    - car
+
+review:
+  alerts:
+    labels:
+      - person
+  detections:
+    labels:
+      - person
+      - car
+
 record:
   enabled: true
   retain:
@@ -68,7 +90,38 @@ cameras:
         - path: rtsp://{FRIGATE_RTSP_USER}:{FRIGATE_RTSP_PASSWORD}@CAMERA_IP:554/cam/realmonitor?channel=1&subtype=1
           roles:
             - detect
+    # detect.enabled defaults to FALSE in Frigate 0.17. If you never set it, the
+    # cameras record but no object detection ever runs and the Alerts and
+    # Detections tabs stay permanently empty.
     detect:
+      enabled: true
       width: 1280
       height: 720
       fps: 5
+
+    motion:
+      # Mask anything that changes on its own every frame -- a burned-in
+      # timestamp overlay is the usual culprit, since a repainting clock reads
+      # as perpetual motion and wakes the detector on an empty scene.
+      #
+      # Coordinates are normalized (0-1) "x1,y1,x2,y2,...". Keep every value
+      # strictly BELOW 1.000: Frigate decides normalized-vs-pixel with a string
+      # comparison (`x > "1.0"`), so "1.000" sorts high, the mask is misread as
+      # pixel coordinates, and config parsing fails. Use 0.999 for a full edge.
+      #
+      # Measure before you mask. Masking a tree "because trees move" can blind a
+      # third of the frame for nothing; diff a few frames first and mask only
+      # what actually changes.
+      mask:
+        - 0.700,0.000,0.999,0.000,0.999,0.100,0.700,0.100
+
+    objects:
+      filters:
+        person:
+          # Fractional values (0.000001-0.99) are a share of the detect frame;
+          # integers are raw pixels. Start low -- an over-large min_area drops
+          # real objects silently, with nothing in the UI to say it happened --
+          # and tune it against the area distribution of real events.
+          min_area: 0.001
+        car:
+          min_area: 0.002
