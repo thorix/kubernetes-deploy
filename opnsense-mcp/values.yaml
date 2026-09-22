@@ -98,4 +98,8 @@ resources:
     cpu: 50m
     memory: 256Mi
   limits:
-    memory: 1Gi
+    # 1Gi OOMKilled this container 174 times (exit 137). Steady state is ~450Mi,
+    # so this is a periodic spike rather than steady growth -- raised to give the
+    # spike headroom. If the restart count keeps climbing, the spike itself is
+    # the bug, not the ceiling.
+    memory: 1536Mi
