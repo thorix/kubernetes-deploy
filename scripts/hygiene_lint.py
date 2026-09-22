@@ -88,7 +88,15 @@ EXCLUDE_SUFFIXES = (
 URL_HOST_RE = re.compile(r'(?:[a-zA-Z][a-zA-Z0-9+.\-]*://|//|@)([a-zA-Z0-9][a-zA-Z0-9.\-]*)')
 KEY_HOST_RE = re.compile(
     r'\b(?:host|hostname|server|url|endpoint|instance|href|domain|fqdn|baseurl'
-    r'|origin|address|source)\b["\']?\s*[:=]+[~\s]*["\']?'
+    r'|origin|address|source'
+    # Container-registry keys. A registry host is just as much a leak as a URL,
+    # but it is written bare (no scheme) so URL_HOST_RE never sees it. \w*
+    # absorbs camelCase prefixes -- dbRepository, harborRegistries -- which a
+    # leading \b cannot match mid-word. Public registries (ghcr.io, docker.io,
+    # quay.io ...) are in PUBLIC_ALLOW and the .lan placeholder in
+    # ALLOWED_SUFFIXES, so ordinary image references stay quiet.
+    r'|\w*repositor(?:y|ies)|\w*registr(?:y|ies)|image'
+    r')\b["\']?\s*[:=]+[~\s]*["\']?'
     r'([a-zA-Z0-9][a-zA-Z0-9.\-]*\.[a-zA-Z]{2,24})', re.IGNORECASE)
 IP_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b')
 PLACEHOLDER_RE = re.compile(r'YOUR_[A-Z_]+|<[^>]+>|\bexample\b', re.IGNORECASE)

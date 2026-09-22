@@ -1,5 +1,5 @@
 image:
-  repository: harbor.thorix.io/library/image-inquisitor
+  repository: harbor.lan/library/image-inquisitor
   # v0.2.0 adds ageDays to the vulnerability report, so image age can be sorted
   # and colour-coded rather than only displayed as a timestamp.
   #
@@ -74,7 +74,7 @@ reportOutputs: "summary,imageSummary,imageRegistry,imageVulnerabilities,imageKub
 
 # Self-hosted registries cannot be auto-detected; without this, everything
 # served from Harbor reports a bare tag with no age.
-harborRegistries: "harbor.thorix.io"
+harborRegistries: "harbor.lan"
 
 # Publish scan results as metrics in addition to the log reports.
 #
@@ -100,7 +100,7 @@ trivy:
   # Pull the DB through Harbor's ghcr proxy rather than ghcr.io directly. Harbor
   # caches it (ghcr-cache/aquasecurity/trivy-db), so repeated pulls are served
   # locally and never hit GHCR's anonymous rate limits.
-  dbRepository: harbor.thorix.io/ghcr-cache/aquasecurity/trivy-db
+  dbRepository: harbor.lan/ghcr-cache/aquasecurity/trivy-db
 
 resources:
   requests:
