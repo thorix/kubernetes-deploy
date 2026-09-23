@@ -36,6 +36,28 @@ repos:
         types: [text]
         exclude: '(^|/)charts/'
 
+  # Guard — relay.py is embedded in holmes-alert-relay/values.yaml as well as
+  # living on disk. The pod runs the embedded copy, so editing only one of them
+  # fails silently in either direction: stale code deployed, or tests passing
+  # against code nothing runs.
+  - repo: local
+    hooks:
+      - id: embedded-sync
+        name: embedded scripts match their values.yaml copy
+        entry: python3 scripts/check_embedded_sync.py
+        language: system
+        pass_filenames: false
+        files: '^holmes-alert-relay/(relay\.py|values\.yaml)$'
+
+  - repo: local
+    hooks:
+      - id: relay-tests
+        name: holmes-alert-relay unit tests
+        entry: python3 -m unittest discover -s holmes-alert-relay -p 'test_*.py'
+        language: system
+        pass_filenames: false
+        files: '^holmes-alert-relay/'
+
   # Guard — commit timestamps must be UTC (offset leaks your region; also on GitHub)
   - repo: local
     hooks:
