@@ -16,6 +16,13 @@ image:
 
 command: ["python", "/app/relay.py"]
 
+# The relay reads /app/relay.py once at process start, so updating the
+# ConfigMap alone changes the file on disk while the running pod keeps
+# executing the old code -- a merged fix that silently never takes effect.
+# Bump this whenever configMap.files.relay.py changes, same as frigate.
+podAnnotations:
+  configmap-hash: "20260923-relay-scope-by-instance"
+
 env:
   - name: HOLMES_URL
     value: "http://holmesgpt-holmes.holmesgpt.svc/api/chat"
