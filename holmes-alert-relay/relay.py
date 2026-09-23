@@ -101,6 +101,27 @@ def _identity(alert: dict) -> tuple[str, str]:
     return labels.get("alertname", "?"), labels.get("namespace", "")
 
 
+def _scope(alert: dict) -> str:
+    """The discriminator that makes a ticket title unique.
+
+    namespace is the right scope for a workload alert and stays stable when a
+    pod is replaced. But blackbox/probe alerts carry NO namespace, so scoping on
+    it alone collapsed every EndpointDown into one ticket: on 2026-09-22 a single
+    "[alert] EndpointDown" stood for both llama.thorix.io and 100.98.214.1, with
+    an analysis that discussed only the first, and fixing one could never close
+    it. Fall back to the target's own identity so each gets its own ticket.
+
+    Order matters -- namespace first, so a workload alert that also carries an
+    instance label is not retitled every time the pod IP changes.
+    """
+    labels = alert.get("labels", {}) or {}
+    for key in ("namespace", "instance", "target", "job"):
+        value = labels.get(key)
+        if value:
+            return value
+    return ""
+
+
 def _prompt_for(alert: dict) -> str:
     name, ns = _identity(alert)
     labels = alert.get("labels", {}) or {}
@@ -141,13 +162,16 @@ def _ask_holmes(alert: dict) -> str:
 # ── Vikunja task lifecycle ───────────────────────────────────────────────────
 
 def _task_title(alert: dict) -> str:
-    name, ns = _identity(alert)
-    return f"[alert] {name}" + (f" — {ns}" if ns else "")
+    name, _ = _identity(alert)
+    scope = _scope(alert)
+    return f"[alert] {name}" + (f" — {scope}" if scope else "")
 
 
 def _ident_key(alert: dict) -> str:
-    name, ns = _identity(alert)
-    return f"{name}/{ns}"
+    # Must split exactly the way _task_title does, or resolving one target would
+    # arm a pending close against a different target's ticket.
+    name, _ = _identity(alert)
+    return f"{name}/{_scope(alert)}"
 
 
 def _find_tasks(title: str) -> tuple[dict | None, dict | None]:
