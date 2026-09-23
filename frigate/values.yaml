@@ -185,3 +185,4 @@ vault:
     rtsp: "frigate/rtsp"
     doorbell: "frigate/doorbell"
     smb: "frigate/smb"
+    mqtt: "frigate/mqtt"
