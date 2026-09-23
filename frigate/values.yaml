@@ -13,7 +13,7 @@ image:
 replicaCount: 1
 
 podAnnotations:
-  configmap-hash: "20260922-frigate-mqtt"
+  configmap-hash: "20260923-frigate-skeleton-mask"
 
 # Use Recreate strategy - only one instance should access recordings PVC
 strategy:
