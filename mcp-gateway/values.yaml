@@ -82,6 +82,20 @@ mcp-stack:
       PORT: "4444"
       DB_POOL_SIZE: "10"
       DB_MAX_OVERFLOW: "20"
+      # Health checks of registered MCP servers. The default is 60s, and each
+      # check is a full MCP initialize round-trip, so it opens a session on the
+      # target. supergateway 3.4.3 spawns a child server process per session and
+      # never expires it, so every check stranded ~80MB (opnsense-mcp) or ~33MB
+      # (grafana-mcp) -- 174 and 96 OOMKills respectively before this was found.
+      #
+      # supergateway 4.0.0 expires idle sessions after 30 minutes, but at a 60s
+      # cadence that still settles around 30 live children (~2.4GB for
+      # opnsense-mcp), so the upgrade alone is NOT sufficient. 300s puts steady
+      # state at ~6 children, which both services hold comfortably.
+      #
+      # Cost: a genuinely dead MCP server takes up to 5 minutes to be marked
+      # unhealthy instead of 1.
+      HEALTH_CHECK_INTERVAL: "300"
       # Logging
       LOG_LEVEL: "INFO"
       LOG_FORMAT: "json"
