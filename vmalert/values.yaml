@@ -507,6 +507,31 @@ server:
             summary: "Disk metrics exporter {{ $labels.job }} is down"
             description: "No SMART or ZFS data is being collected from {{ $labels.instance }}, so disk degradation would go unnoticed."
 
+      - name: fiber-health
+        rules:
+        # Fiber uplink health. A degrading fiber does NOT present as a clean
+        # speed drop -- it presents as accumulating receive errors on the
+        # fiber-facing NIC and/or intermittent packet loss while the link stays
+        # up. These rules catch that early. A static error baseline (e.g. from
+        # interface churn) does not trigger them: rate() of a flat counter is
+        # zero, so only newly accumulating errors fire.
+        - alert: GFiberInterfaceErrors
+          expr: rate(node_network_receive_errs_total{instance="opnsense", device="ix1"}[15m]) > 0.1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Fiber uplink (ix1) is accumulating receive errors"
+            description: "ix1 receive errors are climbing over 15m. A healthy fiber generates none; sustained errors indicate a degrading optical link. Check dmesg for link flaps."
+        - alert: GFiberPacketLoss
+          expr: avg_over_time(probe_success{job="blackbox-ping", instance=~"8.8.8.8|google.com"}[15m]) < 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Partial packet loss to {{ $labels.instance }} over the WAN uplink"
+            description: "More than 10% of ICMP probes to {{ $labels.instance }} failed over 15m while the link stayed up -- the signature of a marginal fiber, distinct from a full outage (EndpointDown). Correlation with time of day or temperature points at a physical/optical fault."
+
 alertmanager:
   enabled: true
   resources:
