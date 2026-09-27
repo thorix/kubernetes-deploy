@@ -15,17 +15,34 @@ panels covering downstream SNR, receive power, corrected/uncorrectable error
 rates, upstream transmit power, per-channel frequency, QAM modulation and
 channel counts.
 
-`id` is set to `null` so the file imports into any Grafana. It is **not**
-provisioned: nothing here carries the `grafana_dashboard` label, and the
-provisioner is configured with `disableDelete: true`, so the copy already in the
-Grafana DB survives this removal and stays editable there. This file is the
-durable copy, since the DB one has no data source once the exporter is gone.
+**This is the only remaining copy.** The dashboard is being deleted from Grafana
+as well, so nothing here is a backup of something that still exists elsewhere.
+It is kept because it may be worth sharing with anyone running the same modem,
+and worth rereading when building something similar.
 
-Checked before committing: the JSON carries no addresses, hostnames or domains —
-its datasource references are the generic `prometheus` and built-in `grafana`
-entries. That matters because dashboards are normally kept out of git here for
-exactly that reason (see the comment on `sidecar.dashboards` in
-`grafana/values.yaml`); this one is an exception because it was verified clean.
+`id` is `null` and `schemaVersion` is 39, so it imports into any Grafana. It
+carries no `__inputs` block, so on import it binds to the default Prometheus
+datasource rather than prompting — repoint it if that is wrong.
+
+Checked before committing rather than assumed: the only external names in the
+file are `8.8.8.8`, `google.com`, `force.com` and `wolfpaulus.com` (the
+exporter author's site). No private addresses, no internal hostnames, no
+modem address. That matters because dashboards are normally kept out of git
+here for exactly that reason — see the comment on `sidecar.dashboards` in
+`grafana/values.yaml` — and this one is an exception only because it was
+verified clean.
+
+### If you are reusing this
+
+It expects [wolfpaulus/sb8200-exporter](https://wolfpaulus.com) metrics plus a
+`blackbox-ping` job for the Ping panel. Note the exporter's own metric names
+carry upstream typos, and the dashboard matches them as-is:
+
+    sb8200_dowmstream_correcteds_total     ("dowm")
+    sb8200_downstrem_freq_hertz            ("downstrem")
+
+Both are spelled that way by the exporter, so do not "fix" them in the queries
+unless your exporter version spells them correctly.
 
 ## Also removed alongside this
 
