@@ -16,7 +16,7 @@ command:
 - /bin/sh
 - -c
 - |
-  npm install -g @richard-stovall/opnsense-mcp-server@0.5.3 supergateway@3.4.3
+  npm install -g @richard-stovall/opnsense-mcp-server@0.5.3 supergateway@4.0.0
   exec supergateway \
     --stdio "opnsense-mcp-server" \
     --outputTransport streamableHttp \
