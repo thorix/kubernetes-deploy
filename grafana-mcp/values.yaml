@@ -18,7 +18,7 @@ command:
 - |
   set -e
   # Install supergateway
-  npm install -g supergateway@3.4.3
+  npm install -g supergateway@4.0.0
 
   # Download mcp-grafana binary
   # Asset filenames use x86_64 / arm64 (not amd64). See github.com/grafana/mcp-grafana/releases.
