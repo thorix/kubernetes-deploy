@@ -7,7 +7,7 @@ metadata:
   name: webhook-cert-gen
   namespace: {{ .Release.Namespace }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "-10"
 ---
@@ -17,7 +17,7 @@ metadata:
   name: webhook-cert-gen
   namespace: {{ .Release.Namespace }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "-10"
 rules:
@@ -31,7 +31,7 @@ metadata:
   name: webhook-cert-gen
   namespace: {{ .Release.Namespace }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "-10"
 roleRef:
@@ -49,7 +49,7 @@ kind: ClusterRole
 metadata:
   name: {{ .Release.Namespace }}-webhook-cert-gen
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "-10"
 rules:
@@ -62,7 +62,7 @@ kind: ClusterRoleBinding
 metadata:
   name: {{ .Release.Namespace }}-webhook-cert-gen
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "-10"
 roleRef:
@@ -80,7 +80,7 @@ metadata:
   name: webhook-cert-gen
   namespace: {{ .Release.Namespace }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     helm.sh/hook-weight: "0"
 spec:
@@ -99,29 +99,66 @@ spec:
               set -e
               cd /tmp
 
-              # Check if secret already exists and has valid cert
-              if kubectl get secret webhook-server-cert -n {{ .Release.Namespace }} -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d | openssl x509 -noout 2>/dev/null; then
-                echo "Valid webhook-server-cert already exists"
-                # Still need to ensure CA is in webhook configs
-                CA_BUNDLE=$(kubectl get secret webhook-server-cert -n {{ .Release.Namespace }} -o jsonpath='{.data.ca\.crt}' 2>/dev/null || echo "")
-                if [ -z "$CA_BUNDLE" ]; then
-                  echo "No CA in secret, regenerating..."
-                else
-                  echo "Patching webhook configurations with existing CA..."
-                  kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
-                    --type='json' -p="[{'op': 'add', 'path': '/webhooks/0/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || true
-                  # Patch all webhooks in the config
-                  for i in $(seq 0 50); do
-                    kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
-                      --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
+              NS={{ .Release.Namespace }}
+              MWC=vault-config-operator-mutating-webhook-configuration
+              VWC=vault-config-operator-validating-webhook-configuration
+
+              # Patch every webhook entry, then PROVE it.
+              #
+              # Patching a guessed index range and breaking on the first failure
+              # leaves every later entry untouched, and an unconditional success
+              # message makes that indistinguishable from a complete run. The
+              # count comes from the live object instead, no patch aborts the
+              # loop, and the result is verified before claiming success.
+              #
+              # This matters because these webhooks carry failurePolicy: Fail:
+              # an entry with no caBundle rejects every write to the resources
+              # it guards, and the failure surfaces far from its cause.
+              patch_all() {
+                CA="$1"; rc=0
+                for KIND_NAME in "mutatingwebhookconfiguration $MWC" \
+                                 "validatingwebhookconfiguration $VWC"; do
+                  set -- $KIND_NAME; KIND=$1; NAME=$2
+                  COUNT=$(kubectl get "$KIND" "$NAME" \
+                    -o jsonpath='{range .webhooks[*]}{.name}{"\n"}{end}' 2>/dev/null | grep -c . || true)
+                  if [ "${COUNT:-0}" -eq 0 ]; then
+                    echo "ERROR: $KIND/$NAME has no webhooks or is missing"; rc=1; continue
+                  fi
+                  echo "Patching $COUNT webhook(s) in $KIND/$NAME"
+                  i=0
+                  while [ "$i" -lt "$COUNT" ]; do
+                    if ! kubectl patch "$KIND" "$NAME" --type=json \
+                         -p="[{\"op\":\"add\",\"path\":\"/webhooks/${i}/clientConfig/caBundle\",\"value\":\"${CA}\"}]" \
+                         >/dev/null; then
+                      echo "  patch FAILED: $KIND/$NAME webhooks[$i]"; rc=1
+                    fi
+                    i=$((i + 1))
                   done
-                  for i in $(seq 0 50); do
-                    kubectl patch validatingwebhookconfiguration vault-config-operator-validating-webhook-configuration \
-                      --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
-                  done
-                  echo "Done patching webhook configurations"
+                  # Verify rather than assume: list any entry still missing a CA.
+                  EMPTY=$(kubectl get "$KIND" "$NAME" \
+                    -o jsonpath='{range .webhooks[*]}{.name}={.clientConfig.caBundle}{"\n"}{end}' \
+                    2>/dev/null | grep '=$' || true)
+                  if [ -n "$EMPTY" ]; then
+                    echo "ERROR: $KIND/$NAME still has entries with no caBundle:"
+                    echo "$EMPTY" | sed 's/=$//; s/^/    /'
+                    rc=1
+                  fi
+                done
+                return $rc
+              }
+
+              # Reuse an existing cert when there is one; only mint a new CA if
+              # the secret is absent or unusable, so the CA stays stable.
+              if kubectl get secret webhook-server-cert -n "$NS" -o jsonpath='{.data.tls\.crt}' 2>/dev/null \
+                   | base64 -d | openssl x509 -noout 2>/dev/null; then
+                CA_BUNDLE=$(kubectl get secret webhook-server-cert -n "$NS" -o jsonpath='{.data.ca\.crt}' 2>/dev/null || echo "")
+                if [ -n "$CA_BUNDLE" ]; then
+                  echo "Reusing existing webhook-server-cert"
+                  patch_all "$CA_BUNDLE"
+                  echo "Webhook CA bundles verified present on every entry"
                   exit 0
                 fi
+                echo "Secret exists but carries no ca.crt - regenerating"
               fi
 
               echo "Generating new certificates..."
@@ -134,7 +171,7 @@ spec:
               # Generate server key and CSR
               openssl genrsa -out tls.key 2048
               openssl req -new -key tls.key -out server.csr \
-                -subj "/CN=vault-config-operator-webhook-service.{{ .Release.Namespace }}.svc"
+                -subj "/CN=vault-config-operator-webhook-service.${NS}.svc"
 
               # Create extension file for SAN
               cat > ext.cnf << EXTEOF
@@ -154,36 +191,17 @@ spec:
               openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
                 -CAcreateserial -out tls.crt -days 3650 -sha256 -extfile ext.cnf
 
-              # Delete existing secret if it exists
-              kubectl delete secret webhook-server-cert -n {{ .Release.Namespace }} 2>/dev/null || true
-
-              # Create the secret with CA included
+              kubectl delete secret webhook-server-cert -n "$NS" 2>/dev/null || true
               kubectl create secret generic webhook-server-cert \
                 --from-file=tls.crt=tls.crt \
                 --from-file=tls.key=tls.key \
                 --from-file=ca.crt=ca.crt \
-                -n {{ .Release.Namespace }}
-
+                -n "$NS"
               echo "Created webhook-server-cert secret"
 
-              # Get CA bundle for webhook config
-              CA_BUNDLE=$(cat ca.crt | base64 | tr -d '\n')
-
-              # Patch mutating webhook configuration
-              echo "Patching mutating webhook configuration..."
-              for i in $(seq 0 50); do
-                kubectl patch mutatingwebhookconfiguration vault-config-operator-mutating-webhook-configuration \
-                  --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
-              done
-
-              # Patch validating webhook configuration
-              echo "Patching validating webhook configuration..."
-              for i in $(seq 0 50); do
-                kubectl patch validatingwebhookconfiguration vault-config-operator-validating-webhook-configuration \
-                  --type='json' -p="[{'op': 'add', 'path': '/webhooks/${i}/clientConfig/caBundle', 'value': '${CA_BUNDLE}'}]" 2>/dev/null || break
-              done
-
-              echo "Successfully configured webhook certificates"
+              CA_BUNDLE=$(base64 < ca.crt | tr -d '\n')
+              patch_all "$CA_BUNDLE"
+              echo "Webhook CA bundles verified present on every entry"
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
