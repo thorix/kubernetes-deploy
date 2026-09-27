@@ -36,6 +36,21 @@ vault:
 
 # Longhorn subchart configuration
 longhorn:
+  # Keep Longhorn's internal traffic unrestricted, explicitly.
+  #
+  # 1.12.x adds networkPolicies.restrictInternalTraffic and defaults it to
+  # TRUE. Six of the seven NetworkPolicy templates gate on that key alone and
+  # never look at networkPolicies.enabled, so leaving enabled: false does NOT
+  # mean "no NetworkPolicies" the way it reads. Rendered against these values,
+  # 1.11.1 produces 0 NetworkPolicy objects and 1.12.1 produces 6.
+  #
+  # Pinning it false keeps 1.12.1 rendering as 1.11.1 did, so the version bump
+  # changes only the version. Restricting storage traffic is a deliberate
+  # change to make on its own -- weighed against the CNI in use, and verified
+  # against Longhorn's data plane -- not a side effect of a dependency bump.
+  networkPolicies:
+    restrictInternalTraffic: false
+
   # Persistence configuration for Talos
   persistence:
     # IMPORTANT: On Talos, Longhorn data must be stored at /var/mnt/longhorn
