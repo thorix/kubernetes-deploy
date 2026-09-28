@@ -426,6 +426,24 @@ server:
           annotations:
             summary: "Image vulnerability scanning has stopped entirely"
             description: "No image-inquisitor scan has been recorded in seven days. The CronJob is likely deleted, suspended, or has never successfully published metrics. Nothing is checking running images for CVEs."
+      - name: holmesgpt
+        rules:
+        - alert: HolmesScheduledCheckStale
+          expr: time() - holmes_scheduledhealthcheck_last_successful_time > 6 * 3600
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HolmesGPT check {{ $labels.namespace }}/{{ $labels.name }} has not succeeded in {{ $value | humanizeDuration }}"
+            description: "Schedules here run between every 10 minutes and hourly, so 6h is several missed runs, not one. These checks failed silently from April to September 2026: the CRs stayed enabled, ArgoCD kept them Synced, and the operator that should have run them had been disabled for OOMing. Nothing reported it, because a check that stops being scheduled emits no failure -- only silence. Check the operator is Ready first: kubectl get pods -n holmesgpt"
+        - alert: HolmesScheduledCheckNeverSucceeded
+          expr: holmes_scheduledhealthcheck_info unless on(name, namespace) holmes_scheduledhealthcheck_last_successful_time
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "HolmesGPT check {{ $labels.namespace }}/{{ $labels.name }} has never recorded a successful run"
+            description: "The check exists and is scheduled but has no lastSuccessfulTime at all, so the staleness rule above has no timestamp to compare against and stays blind to it."
       - name: disk-health
         rules:
         - alert: SmartCounterIncreasing
