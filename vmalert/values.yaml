@@ -436,6 +436,22 @@ server:
           annotations:
             summary: "SMART {{ $labels.attribute_name }} rising on {{ $labels.instance }} {{ $labels.device }}"
             description: "Up by {{ $value }} in 24h. A growing count means the disk is degrading now; a static count may be years old and harmless."
+        - alert: SmartUnreadableSectorsPresent
+          expr: smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Current_Pending_Sector|Offline_Uncorrectable"} > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "SMART {{ $labels.attribute_name }} is {{ $value }} on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Sectors the drive cannot read. This is the companion to SmartCounterIncreasing, which only fires while a counter is RISING inside a 24h window -- so a disk degrading in steps goes quiet between them, and a disk already damaged but no longer worsening never alerts at all. That gap was hiding four affected devices across red and oatmeal. On raidz1 or RAID5 these sectors are exactly what turns one disk failure into data loss, because the rebuild must read every block of every surviving disk."
+        - alert: SmartUnreadableSectorsHigh
+          expr: smartctl_device_attribute{attribute_value_type="raw", attribute_name=~"Current_Pending_Sector|Offline_Uncorrectable|Reported_Uncorrect"} >= 100
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "SMART {{ $labels.attribute_name }} is {{ $value }} on {{ $labels.instance }} {{ $labels.device }}"
+            description: "Replace this disk rather than watching it. Reported_Uncorrect is matched here but deliberately not in the warning rule: a handful on an old drive is ordinary history, hundreds is a failing device."
         - alert: SmartCrcErrorsIncreasing
           expr: (smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"} - min_over_time(smartctl_device_attribute{attribute_value_type="raw", attribute_name="UDMA_CRC_Error_Count"}[24h])) > 0
           for: 10m
