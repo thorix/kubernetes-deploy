@@ -10,3 +10,47 @@ resources:
     memory: 64Mi
   limits:
     memory: 128Mi
+
+# Expose HolmesGPT's ScheduledHealthCheck CRs as metrics.
+#
+# Nothing scrapes custom resources by default, so there was no way to alert on
+# HolmesGPT's own scheduled checks -- which is exactly how they sat dead from
+# April to September 2026 without anyone noticing. The CRs carry
+# status.lastSuccessfulTime; this surfaces it so vmalert can treat staleness
+# the same way it already does for CronJobs and the image scanner.
+customResourceState:
+  enabled: true
+  config:
+    spec:
+      resources:
+        - groupVersionKind:
+            group: holmesgpt.dev
+            version: v1alpha1
+            kind: ScheduledHealthCheck
+          metricNamePrefix: holmes_scheduledhealthcheck
+          labelsFromPath:
+            name: [metadata, name]
+            namespace: [metadata, namespace]
+          metrics:
+            - name: last_successful_time
+              help: "Unix timestamp of the last successful run of this scheduled health check"
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, lastSuccessfulTime]
+            - name: info
+              help: "Static labels for a scheduled health check, including its cron schedule and latest result"
+              each:
+                type: Info
+                info:
+                  labelsFromPath:
+                    schedule: [spec, schedule]
+                    last_result: [status, lastResult]
+
+# customResourceState needs explicit list/watch on the CRD's apiGroup;
+# the chart's default ClusterRole covers built-in resources only.
+rbac:
+  extraRules:
+    - apiGroups: ["holmesgpt.dev"]
+      resources: ["scheduledhealthchecks"]
+      verbs: ["list", "watch"]
