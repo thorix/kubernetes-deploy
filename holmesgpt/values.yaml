@@ -3,9 +3,10 @@
 # Uses local Ollama for LLM inference (no external API calls)
 
 logLevel: INFO
-# The Holmes API server, used on demand for interactive and alert-triggered
-# investigations. The scheduled-check `operator` below stays disabled — it was
-# unstable at its memory limit and on-demand use does not need it.
+# The Holmes API server, used for interactive investigations, alert-triggered
+# ones via holmes-alert-relay, and the scheduled checks the `operator` below
+# now runs. Every investigation is an LLM call against local Ollama, so this
+# server is on the path for all three.
 replicas: 1
 
 # Disable telemetry
@@ -112,14 +113,29 @@ mcpAddons:
   confluenceMcp:
     enabled: false
 
-# Holmes Operator - enables scheduled/automatic investigations
-# Disabled alongside replicas above: the operator repeatedly exceeded its
-# memory limit rather than reaching Ready. Re-enable both together, with a
-# larger limit than it had.
+# Holmes Operator - enables scheduled/automatic investigations.
+#
+# Previously disabled because it repeatedly exceeded its memory limit rather
+# than reaching Ready. The cause was the chart default of 512Mi, which is not
+# enough for a kopf operator holding CRD caches for ~28k HealthCheck objects.
+# Re-enabled with 4x that limit.
+#
+# cleanupCompletedChecks is deliberately OFF for now. 28,300 completed
+# HealthCheck objects accumulated while the operator was down, and turning
+# cleanup on at the same time as the operator would have it try to prune all
+# of them on first reconcile -- a deletion burst this etcd does not need while
+# we are still confirming the operator is stable. Turn it on as a separate,
+# deliberate step once scheduled checks are running cleanly.
 operator:
-  enabled: false
+  enabled: true
   logLevel: INFO
   holmesApiTimeout: 300
   maxHistoryItems: 10
-  cleanupCompletedChecks: true
+  cleanupCompletedChecks: false
   completedCheckTTLHours: 48
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 100m
+    limits:
+      memory: 2Gi
