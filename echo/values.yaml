@@ -2,7 +2,7 @@
 
 image:
   repository: mendhak/http-https-echo
-  tag: "40"
+  tag: "does-not-exist-1790749699"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
