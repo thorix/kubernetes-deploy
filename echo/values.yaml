@@ -62,7 +62,7 @@ probes:
     failureThreshold: 3
   readiness:
     path: /
-    port: 19999
+    port: http
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 3
