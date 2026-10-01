@@ -7,6 +7,14 @@ image:
 
 replicaCount: 1
 
+# echo is a disposable test service and is the app upgrade-pilot's end-to-end
+# recovery tests deliberately break. 60s instead of the 600s default means a
+# stalled rollout reaches ProgressDeadlineExceeded -- and so ArgoCD health
+# Degraded -- while the test is still watching, rather than long after it has
+# reverted. Nothing depends on echo, so calling a stall a failure this quickly
+# costs nothing here; do not copy this onto a service with a slow start.
+progressDeadlineSeconds: 60
+
 # Echo server listens on port 8080
 containerPort: 8080
 

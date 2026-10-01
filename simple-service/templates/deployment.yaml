@@ -12,6 +12,9 @@ metadata:
     {{- include "simple-service.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount | default 1 }}
+  {{- with .Values.progressDeadlineSeconds }}
+  progressDeadlineSeconds: {{ . }}
+  {{- end }}
   {{- with .Values.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}

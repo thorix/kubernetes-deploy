@@ -22,6 +22,14 @@ args: []
 # Replica count
 replicaCount: 1
 
+# How long a rollout may make no progress before Kubernetes sets the
+# ProgressDeadlineExceeded condition -- which is what makes ArgoCD report the
+# app Degraded rather than leaving it Progressing indefinitely. Unset here, so
+# the Kubernetes default of 600s applies and nothing changes for any app that
+# does not opt in. Worth lowering on a service where a stalled rollout should
+# be called a failure quickly.
+progressDeadlineSeconds:
+
 # Deployment strategy
 strategy: {}
 # type: Recreate
