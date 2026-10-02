@@ -2,7 +2,7 @@
 
 image:
   repository: mendhak/http-https-echo
-  tag: "40"
+  tag: "42"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
