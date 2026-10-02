@@ -2,7 +2,7 @@
 
 # Hayhooks - REST API and MCP server for Haystack pipelines
 hayhooks:
-  image: deepset/hayhooks:v1.17.0
+  image: deepset/hayhooks:v1.24.0
   replicas: 1
 
   # Pipeline dependencies are pip-installed at pod start into /opt/extra-packages,
