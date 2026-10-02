@@ -6,7 +6,7 @@ replicaCount: 1
 image:
   repository: nousresearch/hermes-agent
   # v2026.8.19 linux/amd64 — digest is authoritative; tag kept for readability.
-  tag: "v2026.9.14@sha256:1f983df4d778d46b3c3892d7598c9d57291430a6e35936ebc371ae1e5766699a"
+  tag: "v2026.9.24@sha256:2fd023efbb8d3d2b0ce1a73d028b07370cff34f567cfe0e999553e8c327ea283"
   pullPolicy: IfNotPresent
 
 # ENTRYPOINT is /init (s6 supervisor: starts root, drops to HERMES_UID/GID).
@@ -72,7 +72,7 @@ serviceAccount:
 # Dashboard as a second container in the same pod (shares localhost + /opt/data).
 extraContainers:
   - name: dashboard
-    image: "nousresearch/hermes-agent:v2026.9.14@sha256:1f983df4d778d46b3c3892d7598c9d57291430a6e35936ebc371ae1e5766699a"
+    image: "nousresearch/hermes-agent:v2026.9.24@sha256:2fd023efbb8d3d2b0ce1a73d028b07370cff34f567cfe0e999553e8c327ea283"
     imagePullPolicy: IfNotPresent
     args: ["dashboard", "--host", "127.0.0.1", "--no-open"]
     env:
