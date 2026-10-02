@@ -2,7 +2,8 @@
 # by podcast-trim. It receives plain WAV over HTTP and returns timestamped text.
 # GPU access mirrors ollama (privileged + the host's /dev/dri) because the
 # node's device-plugin GPU slot is held by another workload. The model is baked
-# into the image, so the pod has no egress at all; only podcast-trim may connect.
+# into the image, so the pod's only egress is DNS. (A non-empty egress list is
+# what makes Cilium enforce default-deny; an empty one leaves egress open.)
 workloadType: Deployment
 replicaCount: 1
 strategy:
@@ -79,5 +80,5 @@ networkPolicy:
                 protocol: TCP
   egress:
     denyAll: true
-    allowDNS: false
+    allowDNS: true
     customRules: []
