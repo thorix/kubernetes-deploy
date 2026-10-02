@@ -1,6 +1,6 @@
 dependencies:
 - name: vault-config-operator
   repository: https://redhat-cop.github.io/vault-config-operator
-  version: v0.8.52
-digest: sha256:8cd3c4783ed4078c9a50eee509f2091ebb2a6bb934b5fc903e0f8603be368fe8
-generated: "2026-09-04T07:37:03.182009228Z"
+  version: v1.0.2
+digest: sha256:cf60b77a72e50512d3d19adf4cfb41a32547da9bdad5637822605cf3cbc36f38
+generated: "2026-09-27T15:07:37.557026433Z"
