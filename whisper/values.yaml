@@ -1,0 +1,83 @@
+# whisper: whisper.cpp speech-to-text server on the GPU (Vulkan backend), used
+# by podcast-trim. It receives plain WAV over HTTP and returns timestamped text.
+# GPU access mirrors ollama (privileged + the host's /dev/dri) because the
+# node's device-plugin GPU slot is held by another workload. The model is baked
+# into the image, so the pod has no egress at all; only podcast-trim may connect.
+workloadType: Deployment
+replicaCount: 1
+strategy:
+  type: Recreate
+
+image:
+  repository: harbor.lan/library/whisper-vulkan
+  tag: "v0.1.0"
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+httproute:
+  enabled: false
+
+probes:
+  enabled: true
+  liveness:
+    # TCP rather than /health, so a long transcription never looks like a hang.
+    type: tcp
+    port: 8080
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+  readiness:
+    type: http
+    path: /health
+    port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+securityContext:
+  privileged: true
+  seccompProfile:
+    type: RuntimeDefault
+
+volumes:
+  - name: dri
+    hostPath:
+      path: /dev/dri
+      type: Directory
+volumeMounts:
+  - name: dri
+    mountPath: /dev/dri
+
+serviceAccount:
+  create: true
+  name: whisper
+  automountServiceAccountToken: false
+
+resources:
+  requests: { cpu: 500m, memory: 2Gi }
+  limits: { memory: 6Gi }
+
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: false
+    customRules:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: audiobookshelf
+              k8s:app.kubernetes.io/instance: podcast-trim
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+  egress:
+    denyAll: true
+    allowDNS: false
+    customRules: []
