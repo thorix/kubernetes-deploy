@@ -6,7 +6,7 @@ workloadType: StatefulSet
 
 image:
   repository: mbentley/omada-controller
-  tag: "5.14.32.2"
+  tag: "5.15.24.19"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
