@@ -1,0 +1,6 @@
+namespace: whisper
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../whisper/values.yaml
