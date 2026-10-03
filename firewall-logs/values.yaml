@@ -1,0 +1,102 @@
+# Firewall remote log receiver.
+#
+# Why this exists: the firewall's packet log, service log and audit log only
+# live on the firewall's own disk. Shipping them to Loki makes them searchable
+# next to everything else, and lets Loki's ruler alert on them -- for example
+# when a URL-table alias stops refreshing, which silently turns a block rule
+# into a no-op.
+#
+# A SEPARATE Alloy release from the `alloy` DaemonSet, for the same reason as
+# talos-logs: a network receiver needs one fixed address, which a DaemonSet
+# cannot provide.
+#
+# Labels are deliberately few and bounded: job, app, host, and -- for the
+# packet log only -- action, dir and interface. The rule ID is high-cardinality,
+# so it goes into structured metadata, which is queryable but not indexed.
+# Addresses and ports stay in the log line.
+#
+# Caveat, shared with talos-logs: this receiver runs inside the cluster, so a
+# cluster outage loses telemetry. The firewall keeps its own local logs, which
+# remain the source of truth.
+
+alloy:
+  configMap:
+    content: |
+      // RFC 5424 syslog over TCP. Each sending application becomes one stream.
+      loki.source.syslog "firewall" {
+        listener {
+          address                = "0.0.0.0:5514"
+          protocol               = "tcp"
+          use_incoming_timestamp = true
+          labels                 = { job = "firewall" }
+        }
+        relabel_rules = loki.relabel.firewall.rules
+        forward_to    = [loki.process.firewall.receiver]
+      }
+
+      loki.relabel "firewall" {
+        forward_to = []
+
+        rule {
+          source_labels = ["__syslog_message_app_name"]
+          target_label  = "app"
+        }
+
+        rule {
+          source_labels = ["__syslog_message_hostname"]
+          target_label  = "host"
+        }
+      }
+
+      loki.process "firewall" {
+        // The packet log is CSV: rulenr, subrulenr, anchor, rid, interface,
+        // reason, action, dir, ... The first eight fields have the same shape
+        // for IPv4 and IPv6, so only those are parsed here.
+        stage.match {
+          selector = "{app=\"filterlog\"}"
+
+          stage.regex {
+            expression = "^[^,]*,[^,]*,[^,]*,(?P<rid>[^,]*),(?P<interface>[^,]*),[^,]*,(?P<action>[^,]*),(?P<dir>[^,]*),"
+          }
+
+          stage.labels {
+            values = { action = "", dir = "", interface = "" }
+          }
+
+          stage.structured_metadata {
+            values = { rid = "" }
+          }
+        }
+
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.victoriametrics.svc:3100/loki/api/v1/push"
+        }
+      }
+
+  extraPorts:
+    - name: syslog
+      port: 5514
+      targetPort: 5514
+      protocol: TCP
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+controller:
+  type: deployment
+  replicas: 1
+
+# No Kubernetes discovery is needed; the shared alloy release does that.
+rbac:
+  create: false
+
+serviceMonitor:
+  enabled: false

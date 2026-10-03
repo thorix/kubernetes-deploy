@@ -1,0 +1,12 @@
+# firewall-logs -- receives the firewall's syslog stream and forwards it to Loki.
+#
+# Deployed into the victoriametrics namespace, alongside alloy, talos-logs and
+# loki, so the whole logging path lives together.
+namespace: victoriametrics
+
+helm:
+- chart: alloy
+  repoURL: https://grafana.github.io/helm-charts
+  targetRevision: "1.12.1"
+  valuesFiles:
+  - firewall-logs/values.yaml
