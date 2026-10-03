@@ -1,0 +1,8 @@
+# goflow2 -- NetFlow collector. Decodes NetFlow v9 and prints one JSON object
+# per flow to stdout, where the cluster's Alloy DaemonSet ships it to Loki.
+namespace: victoriametrics
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../goflow2/values.yaml
