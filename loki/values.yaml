@@ -54,6 +54,26 @@ loki:
     retention_enabled: true
     delete_request_store: filesystem
 
+  # Ruler: evaluates LogQL alert rules and sends them to the existing
+  # Alertmanager, so log alerts share the metric alerts' Slack routing instead
+  # of a second alerting system.
+  #
+  # Rules are ConfigMaps labelled loki_rule, which the chart's rules sidecar
+  # writes into /rules. auth_enabled is false, so the tenant is "fake" and a
+  # rule file must land in /rules/fake/ -- each rules ConfigMap sets the
+  # sidecar's k8s-sidecar-target-directory annotation to put it there.
+  rulerConfig:
+    storage:
+      type: local
+      local:
+        directory: /rules
+    # Not /rules, which is Loki's default: the ruler writes scratch copies of
+    # rule files here, and must never write into the directory the sidecar owns.
+    rule_path: /var/loki/ruler-scratch
+    alertmanager_url: http://vmalert-victoria-metrics-alert-alertmanager.victoriametrics.svc:9093
+    enable_api: true
+    enable_alertmanager_v2: true
+
 singleBinary:
   replicas: 1
   # Let the kubernetes-pods scrape job collect Loki's own metrics.
