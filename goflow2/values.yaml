@@ -1,0 +1,81 @@
+# goflow2 -- NetFlow / IPFIX collector.
+#
+# Writes one JSON line per flow to stdout. The Alloy DaemonSet already ships
+# every pod's stdout to Loki, so nothing else needs wiring: flows are queryable
+# as {app="goflow2"} |= "NETFLOW_V9" | json.
+#
+# Addresses and ports stay in the log line, never in labels -- per-IP labels
+# would explode Loki's index.
+#
+# The receiving address (a LoadBalancer VIP) is set in the private overlay.
+
+nameOverride: goflow2
+
+image:
+  repository: netsampler/goflow2
+  tag: "v2.2.7"
+  pullPolicy: IfNotPresent
+
+args:
+  - -listen=netflow://:2055
+  - -format=json
+  - -transport=file
+  - -addr=:8080
+
+# Alloy derives the Loki "app" label from this pod label.
+podLabels:
+  app: goflow2
+
+# /metrics exposes goflow2's own counters (flows received, decode errors).
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+ports:
+  - name: netflow
+    containerPort: 2055
+    protocol: UDP
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+
+# Only NetFlow is exposed on the Service; metrics and health stay pod-local.
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    - name: netflow
+      port: 2055
+      targetPort: 2055
+      protocol: UDP
+
+# /__health returns 503 until goflow2's listeners are running.
+probes:
+  enabled: true
+  liveness:
+    type: http
+    path: /__health
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    type: http
+    path: /__health
+    port: http
+    initialDelaySeconds: 2
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+serviceAccount:
+  create: true
