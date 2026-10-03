@@ -4,6 +4,12 @@
 # every pod's stdout to Loki, so nothing else needs wiring: flows are queryable
 # as {app="goflow2"} |= "NETFLOW_V9" | json.
 #
+# Use in_bytes / in_packets for traffic volume, not bytes / packets. goflow2
+# writes both IN_BYTES (field 1) and OUT_BYTES (field 23) into "bytes", and
+# packets likewise. Some exporters send OUT_* after IN_* in the template,
+# always as 0, so "bytes" ends up 0. The mapping below copies fields 1 and 2
+# into their own JSON keys.
+#
 # Addresses and ports stay in the log line, never in labels -- per-IP labels
 # would explode Loki's index.
 #
@@ -21,6 +27,83 @@ args:
   - -format=json
   - -transport=file
   - -addr=:8080
+  - -mapping=/etc/goflow2/mapping.yaml
+
+# goflow2 mapping file. Setting formatter.fields replaces goflow2's default
+# JSON key list, so the defaults are listed here in full, plus the two
+# custom keys.
+configMap:
+  enabled: true
+  mountPath: /etc/goflow2
+  files:
+    mapping.yaml: |
+      formatter:
+        fields:
+          - type
+          - time_received_ns
+          - sequence_num
+          - sampling_rate
+          - sampler_address
+          - time_flow_start_ns
+          - time_flow_end_ns
+          - bytes
+          - packets
+          - in_bytes
+          - in_packets
+          - src_addr
+          - dst_addr
+          - etype
+          - proto
+          - src_port
+          - dst_port
+          - in_if
+          - out_if
+          - src_mac
+          - dst_mac
+          - src_vlan
+          - dst_vlan
+          - vlan_id
+          - ip_tos
+          - forwarding_status
+          - ip_ttl
+          - ip_flags
+          - tcp_flags
+          - icmp_type
+          - icmp_code
+          - ipv6_flow_label
+          - fragment_id
+          - fragment_offset
+          - src_as
+          - dst_as
+          - next_hop
+          - next_hop_as
+          - src_net
+          - dst_net
+          - bgp_next_hop
+          - bgp_communities
+          - as_path
+          - mpls_ttl
+          - mpls_label
+          - mpls_ip
+          - observation_domain_id
+          - observation_point_id
+          - layer_stack
+          - layer_size
+          - ipv6_routing_header_addresses
+          - ipv6_routing_header_seg_left
+        protobuf:
+          - name: in_bytes
+            index: 1001
+            type: varint
+          - name: in_packets
+            index: 1002
+            type: varint
+      netflowv9:
+        mapping:
+          - field: 1    # IN_BYTES
+            destination: in_bytes
+          - field: 2    # IN_PKTS
+            destination: in_packets
 
 # Alloy derives the Loki "app" label from this pod label.
 podLabels:
