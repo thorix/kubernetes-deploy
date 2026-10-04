@@ -1,0 +1,155 @@
+# podcast-trim: removes the opening preview and sponsor reads from podcast
+# episodes and publishes them to the Audiobookshelf podcast library. Runs in
+# the audiobookshelf namespace so it can mount the library's media claim. It
+# talks to the whisper service (speech-to-text), ollama (decisions), vikunja
+# (problem reports) and Audiobookshelf (rescan). The hosts each show downloads
+# from are allowed in the private overlay.
+workloadType: CronJob
+
+image:
+  repository: harbor.lan/library/podcast-trim
+  tag: "v0.1.0"
+  pullPolicy: IfNotPresent
+
+cronjob:
+  schedule: "17 */3 * * *"
+  concurrencyPolicy: Forbid
+  restartPolicy: Never
+  backoffLimit: 1
+  activeDeadlineSeconds: 7200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Suspended until the end-to-end check passes; unsuspend in a follow-up PR.
+  suspend: true
+
+env:
+  - name: PODCASTS_DIR
+    value: /podcasts
+  - name: WORK_DIR
+    value: /work
+  - name: TMPDIR
+    value: /work
+  - name: WHISPER_URL
+    value: http://whisper-simple-service.whisper.svc:8080
+  - name: OLLAMA_URL
+    value: http://ollama.ollama.svc.cluster.local:11434
+  - name: OLLAMA_MODEL
+    value: qwen3:30b-a3b
+  - name: VIKUNJA_URL
+    value: http://vikunja-simple-service.vikunja.svc:3456/api/v1
+  - name: VIKUNJA_PROJECT_ID
+    value: "1"
+  - name: ABS_URL
+    value: http://audiobookshelf.audiobookshelf.svc
+envFrom:
+  - secretRef:
+      name: podcast-trim-simple-service-credentials   # VIKUNJA_TOKEN, ABS_TOKEN, ABS_LIBRARY_ID (Vault)
+
+vault:
+  enabled: true
+  kubernetes:
+    role: podcast-trim
+    serviceAccount: podcast-trim
+  secrets:
+    credentials: podcast-trim/credentials
+
+serviceAccount:
+  create: true
+  name: podcast-trim
+  automountServiceAccountToken: false
+
+volumes:
+  - name: podcasts
+    persistentVolumeClaim:
+      claimName: audiobookshelf-data
+  - name: work
+    emptyDir:
+      sizeLimit: 2Gi
+volumeMounts:
+  - name: podcasts
+    mountPath: /podcasts
+    subPath: podcasts
+  - name: work
+    mountPath: /work
+
+# uid/gid 1000: the media share is mounted uid=1000,gid=1000 with 0755/0644,
+# so only uid 1000 can write to it. No fsGroup (it would chown the whole share).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests: { cpu: 500m, memory: 512Mi }
+  limits: { memory: 1Gi }
+
+service:
+  enabled: false
+httproute:
+  enabled: false
+probes:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  ingress:
+    gatewayOnly: false
+    customRules:
+      - fromEndpoints:
+          - matchLabels:
+              io.cilium.k8s.policy.deny-sentinel: no-inbound
+  egress:
+    denyAll: true
+    allowDNS: false
+    customRules:
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s:k8s-app: kube-dns
+        toPorts:
+          - ports:
+              - port: "53"
+                protocol: UDP
+              - port: "53"
+                protocol: TCP
+            rules:
+              dns:
+                - matchPattern: "*"
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: whisper
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: ollama
+        toPorts:
+          - ports:
+              - port: "11434"
+                protocol: TCP
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: vikunja
+        toPorts:
+          - ports:
+              - port: "3456"
+                protocol: TCP
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: audiobookshelf
+        toPorts:
+          - ports:
+              - port: "80"
+                protocol: TCP
