@@ -25,6 +25,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: {{ .Values.cronjob.backoffLimit | default 2 }}
+      {{- with .Values.cronjob.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ . }}
+      {{- end }}
       template:
         metadata:
           {{- with .Values.podAnnotations }}

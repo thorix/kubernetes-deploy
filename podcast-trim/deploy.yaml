@@ -1,0 +1,6 @@
+namespace: audiobookshelf
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../podcast-trim/values.yaml

@@ -284,6 +284,8 @@ cronjob:
   failedJobsHistoryLimit: 3
   backoffLimit: 2
   restartPolicy: OnFailure
+  # Optional: stop a run that takes longer than this many seconds (unset = no limit).
+  # activeDeadlineSeconds: 7200
 
 # CiliumNetworkPolicy configuration
 networkPolicy:
