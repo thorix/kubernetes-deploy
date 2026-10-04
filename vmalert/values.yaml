@@ -633,6 +633,15 @@ alertmanager:
       webhook_configs:
       - url: http://holmes-alert-relay-simple-service.victoriametrics.svc:8080/alert
         send_resolved: true
+    # Phone push through Home Assistant's companion app. HA delivers over the
+    # app's local websocket while the phone is on home Wi-Fi, so this path
+    # works with the WAN down -- unlike Slack, which is unreachable in exactly
+    # that case. The URL carries the webhook ID, so it comes from Vault
+    # (Secret vmalert-ha-webhook, mounted below).
+    - name: ha-phone
+      webhook_configs:
+      - url_file: /etc/alertmanager/ha/HA_WEBHOOK_URL
+        send_resolved: true
     route:
       receiver: slack-warning
       group_by:
@@ -642,6 +651,18 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+      # Anything labelled notify=phone also goes to the phone. First, with
+      # continue:true, so criticals still reach Holmes and Slack below. Short
+      # waits because this is the page for "the internet is down".
+      - receiver: ha-phone
+        matchers:
+        - notify = phone
+        continue: true
+        group_by:
+        - alertname
+        group_wait: 10s
+        group_interval: 1m
+        repeat_interval: 1h
       # Critical alerts ALSO go to Holmes for investigation; continue:true so
       # they still fall through to slack-critical below (existing alerting intact).
       - receiver: holmes-relay
@@ -655,9 +676,18 @@ alertmanager:
   - name: slack-secret
     secret:
       secretName: vmalert-slack
+  # optional: a missing Vault secret must never stop Alertmanager from
+  # starting -- that would take down every alert, not just this receiver.
+  - name: ha-webhook
+    secret:
+      secretName: vmalert-ha-webhook
+      optional: true
   extraVolumeMounts:
   - name: slack-secret
     mountPath: /etc/alertmanager/secrets
+    readOnly: true
+  - name: ha-webhook
+    mountPath: /etc/alertmanager/ha
     readOnly: true
   service:
     annotations: {}
