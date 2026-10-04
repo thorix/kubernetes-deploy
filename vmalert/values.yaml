@@ -25,7 +25,12 @@ server:
       - name: blackbox
         rules:
         - alert: EndpointDown
-          expr: probe_success == 0
+          # The two WAN reachability targets are excluded: a full internet
+          # outage is InternetDown's job (fiber-health group below), which
+          # needs both to fail together and pages the phone. Leaving them here
+          # would also open a Holmes investigation for every outage and fire
+          # on the single-target blips that happen several times a week.
+          expr: probe_success{instance!~"8.8.8.8|google.com"} == 0
           for: 2m
           labels:
             severity: critical
@@ -565,6 +570,34 @@ server:
           annotations:
             summary: "Partial packet loss to {{ $labels.instance }} over the WAN uplink"
             description: "More than 10% of ICMP probes to {{ $labels.instance }} failed over 15m while the link stayed up -- the signature of a marginal fiber, distinct from a full outage (EndpointDown). Correlation with time of day or temperature points at a physical/optical fault."
+        # Full WAN outage. Both external targets must fail together: either one
+        # alone blips for ~2 minutes several times a week (ICMP rate limiting,
+        # or a DNS hiccup for google.com), while every real outage takes both
+        # down for 12+ minutes. count(... == 0) == 2 requires both series to
+        # exist and both to be down, so a vanished series can never turn this
+        # into a single-target alert; count() also drops the instance label,
+        # so one outage is one alert. 3m at the 60s ping interval is ~3 failed
+        # rounds. notify=phone routes it to the phone over the LAN, because
+        # Slack is unreachable during exactly this failure.
+        - alert: InternetDown
+          expr: count(probe_success{job="blackbox-ping", instance=~"8.8.8.8|google.com"} == 0) == 2
+          for: 3m
+          labels:
+            severity: critical
+            notify: phone
+          annotations:
+            summary: "Internet is down: 8.8.8.8 and google.com both unreachable"
+            description: "Every external probe has failed for 3+ minutes while the LAN is up. Slack alerts are queued until the WAN returns. Check the Fiber Jack's four lights, then ix1 on the firewall; GFiberInterfaceErrors or GFiberPacketLoss firing beforehand points at the fiber."
+        # If either WAN probe series disappears, InternetDown cannot fire,
+        # because it needs both. This catches that.
+        - alert: InternetProbeMissing
+          expr: count(probe_success{job="blackbox-ping", instance=~"8.8.8.8|google.com"}) < 2 or absent(probe_success{job="blackbox-ping", instance=~"8.8.8.8|google.com"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Internet reachability probe is missing"
+            description: "A WAN probe series (8.8.8.8 or google.com) is missing. InternetDown cannot fire until both return. Check the blackbox exporter and the blackbox-ping scrape job."
 
 alertmanager:
   enabled: true
