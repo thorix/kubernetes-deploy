@@ -3,7 +3,7 @@ workloadType: CronJob
 
 image:
   repository: harbor.lan/library/upgrade-pilot   # real registry host lives in the config overlay
-  tag: "v0.1.0"
+  tag: "v0.1.1"
   pullPolicy: IfNotPresent
 
 cronjob:
@@ -32,13 +32,20 @@ env:
     value: "upgrade-pilot (scheduled)"
   - name: GIT_AUTHOR_EMAIL
     value: "8203031+thorix@users.noreply.github.com"
-  # Fine-grained token: contents read/write on the pilot repo, read on the
-  # target repo's contents and pull requests. Synced from Vault (below).
+  # Two fine-grained tokens, both synced from Vault (below), so that nothing in
+  # the cluster can write to this repo -- the one ArgoCD deploys from.
+  #   GH_TOKEN       read-only: this repo's PRs and files
+  #   GH_PUSH_TOKEN  read/write on the pilot's own repo only: clone + decision log
   - name: GH_TOKEN
     valueFrom:
       secretKeyRef:
         name: upgrade-pilot-simple-service-github
         key: GH_TOKEN
+  - name: GH_PUSH_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: upgrade-pilot-simple-service-github
+        key: GH_PUSH_TOKEN
 
 vault:
   enabled: true
