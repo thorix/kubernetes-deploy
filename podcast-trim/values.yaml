@@ -8,7 +8,7 @@ workloadType: CronJob
 
 image:
   repository: harbor.lan/library/podcast-trim
-  tag: "v0.1.0"
+  tag: "v0.1.1"
   pullPolicy: IfNotPresent
 
 cronjob:
