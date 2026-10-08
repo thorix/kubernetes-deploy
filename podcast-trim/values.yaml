@@ -19,8 +19,7 @@ cronjob:
   activeDeadlineSeconds: 7200
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # Suspended until the end-to-end check passes; unsuspend in a follow-up PR.
-  suspend: true
+  suspend: false
 
 env:
   - name: PODCASTS_DIR
