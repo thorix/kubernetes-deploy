@@ -20,11 +20,13 @@ spec:
   timeZone: {{ . | quote }}
   {{- end }}
   concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy | default "Forbid" }}
-  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit | default 3 }}
-  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit | default 3 }}
+  {{- /* hasKey, not `default`: Helm's default treats 0 as unset, so `backoffLimit: 0`
+         (no retries) used to render as 2. Zero is meaningful for all three of these. */}}
+  successfulJobsHistoryLimit: {{ ternary .Values.cronjob.successfulJobsHistoryLimit 3 (hasKey .Values.cronjob "successfulJobsHistoryLimit") }}
+  failedJobsHistoryLimit: {{ ternary .Values.cronjob.failedJobsHistoryLimit 3 (hasKey .Values.cronjob "failedJobsHistoryLimit") }}
   jobTemplate:
     spec:
-      backoffLimit: {{ .Values.cronjob.backoffLimit | default 2 }}
+      backoffLimit: {{ ternary .Values.cronjob.backoffLimit 2 (hasKey .Values.cronjob "backoffLimit") }}
       {{- with .Values.cronjob.activeDeadlineSeconds }}
       activeDeadlineSeconds: {{ . }}
       {{- end }}

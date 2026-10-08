@@ -431,6 +431,28 @@ server:
           annotations:
             summary: "Image vulnerability scanning has stopped entirely"
             description: "No image-inquisitor scan has been recorded in seven days. The CronJob is likely deleted, suspended, or has never successfully published metrics. Nothing is checking running images for CVEs."
+      # The upgrade pilot pushes a heartbeat once per daily run. It once sat idle
+      # for five days with nothing to notice, because nothing ran it. Same shape
+      # as image-inquisitor above: last_over_time, because a once-a-day sample
+      # is stale to an instant query between runs.
+      - name: upgrade-pilot
+        rules:
+        - alert: UpgradePilotStale
+          expr: (time() - last_over_time(upgrade_pilot_last_run_timestamp_seconds[7d])) > 86400 * 2
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot has not run in {{ $value | humanizeDuration }}"
+            description: "The daily upgrade-pilot run last reported {{ $value | humanizeDuration }} ago, so new Renovate PRs are not being evaluated or logged for review. Two days allows one missed run. Check: kubectl get cronjob,job -n upgrade-pilot"
+        - alert: UpgradePilotMissing
+          expr: absent(last_over_time(upgrade_pilot_last_run_timestamp_seconds[7d]))
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot has stopped entirely"
+            description: "No upgrade-pilot heartbeat in seven days: the CronJob is deleted, suspended, or has never completed a run that reached VictoriaMetrics."
       - name: holmesgpt
         rules:
         - alert: HolmesScheduledCheckStale

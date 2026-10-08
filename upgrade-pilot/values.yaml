@@ -1,0 +1,83 @@
+# upgrade-pilot CronJob -- see deploy.yaml for what this is and is not.
+workloadType: CronJob
+
+image:
+  repository: harbor.lan/library/upgrade-pilot   # real registry host lives in the config overlay
+  tag: "v0.1.1"
+  pullPolicy: IfNotPresent
+
+cronjob:
+  schedule: "0 13 * * *"   # 13:00 UTC = 07:00 Mountain: new decisions are waiting in the morning
+  concurrencyPolicy: Forbid
+  # No retries. A run that fails should show as a failed Job -- the next day's
+  # run re-clones from scratch anyway, and a retry would only push the failure
+  # further from anyone's view.
+  restartPolicy: Never
+  backoffLimit: 0
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+# The pilot calls the Kubernetes API (kubectl) with this account; the RBAC chart
+# in rbac/ binds it read-only. Named explicitly so that binding can find it.
+serviceAccount:
+  create: true
+  name: upgrade-pilot
+  automountServiceAccountToken: true
+
+env:
+  # Heartbeat target. The import endpoint takes Prometheus exposition text.
+  - name: VM_URL
+    value: "http://victoriametrics-victoria-metrics-single-server.victoriametrics.svc.cluster.local:8428"
+  - name: GIT_AUTHOR_NAME
+    value: "upgrade-pilot (scheduled)"
+  - name: GIT_AUTHOR_EMAIL
+    value: "8203031+thorix@users.noreply.github.com"
+  # Two fine-grained tokens, both synced from Vault (below), so that nothing in
+  # the cluster can write to this repo -- the one ArgoCD deploys from.
+  #   GH_TOKEN       read-only: this repo's PRs and files
+  #   GH_PUSH_TOKEN  read/write on the pilot's own repo only: clone + decision log
+  - name: GH_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: upgrade-pilot-simple-service-github
+        key: GH_TOKEN
+  - name: GH_PUSH_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: upgrade-pilot-simple-service-github
+        key: GH_PUSH_TOKEN
+
+vault:
+  enabled: true
+  kubernetes:
+    role: upgrade-pilot
+    serviceAccount: upgrade-pilot
+  secrets:
+    github: upgrade-pilot/github
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# A CronJob needs no service, route, probes or storage.
+service:
+  enabled: false
+httproute:
+  enabled: false
+probes:
+  enabled: false
+persistence:
+  enabled: false
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault

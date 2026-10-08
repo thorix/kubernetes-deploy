@@ -1,0 +1,37 @@
+# Read-only. These are exactly the reads the pilot makes to judge a PR:
+#   - workloads + PVCs, to decide whether an app keeps data
+#     (renovate_triage.cluster_facts, attributing by ArgoCD tracking-id)
+#   - ArgoCD Applications, to read an app's destination namespace and sync state
+#   - namespaces, to tell a real empty namespace from one that does not exist
+# Nothing here can change the cluster. Merging -- when it is ever enabled --
+# happens through git, not through this account.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: upgrade-pilot-read
+rules:
+- apiGroups: [""]
+  resources: ["pods", "persistentvolumeclaims", "namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list"]
+- apiGroups: ["batch"]
+  resources: ["cronjobs"]
+  verbs: ["get", "list"]
+- apiGroups: ["argoproj.io"]
+  resources: ["applications"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: upgrade-pilot-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: upgrade-pilot-read
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
