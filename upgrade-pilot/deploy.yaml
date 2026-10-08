@@ -1,0 +1,21 @@
+# upgrade-pilot -- the Renovate upgrade pilot, run daily as a CronJob.
+#
+# Dry-run only: it evaluates open Renovate PRs, logs any new decisions for a
+# human to review, and pushes a heartbeat. It merges nothing. The pilot's code
+# lives in its own (private) repo and is cloned at run time; this app only
+# schedules it.
+#
+# Two sources: simple-service runs the CronJob, and the small local chart in
+# rbac/ grants the read-only cluster access the pilot needs to judge a PR
+# (workloads, PVCs, ArgoCD Applications). simple-service has no ClusterRole
+# support of its own.
+
+namespace: upgrade-pilot
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../upgrade-pilot/values.yaml
+- path: upgrade-pilot/rbac
+  valuesFiles:
+  - values.yaml

@@ -1,0 +1,2 @@
+# Must match serviceAccount.name in ../values.yaml.
+serviceAccountName: upgrade-pilot

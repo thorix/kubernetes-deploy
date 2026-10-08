@@ -1,0 +1,5 @@
+apiVersion: v2
+name: upgrade-pilot-rbac
+description: Read-only cluster access for the upgrade-pilot CronJob
+type: application
+version: 0.1.0
