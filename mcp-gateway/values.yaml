@@ -96,6 +96,11 @@ mcp-stack:
       # Cost: a genuinely dead MCP server takes up to 5 minutes to be marked
       # unhealthy instead of 1.
       HEALTH_CHECK_INTERVAL: "300"
+      # The chart default page size is 50, so tool/server/gateway listings
+      # silently stopped at 50 -- grafana-mcp alone exposes ~50 tools, and the
+      # federated set is well past that. 500 is the chart's own
+      # PAGINATION_MAX_PAGE_SIZE ceiling.
+      PAGINATION_DEFAULT_PAGE_SIZE: "500"
       # Logging
       LOG_LEVEL: "INFO"
       LOG_FORMAT: "json"
