@@ -14,3 +14,5 @@ vault:
     tokenTTL: 86400
   secrets:
     mcp-gateway: holmesgpt/mcp-gateway
+    # LiteLLM virtual key (LITELLM_API_KEY)
+    litellm: holmesgpt/litellm

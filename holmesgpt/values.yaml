@@ -45,12 +45,22 @@ additionalEnvVars:
     secretKeyRef:
       name: holmesgpt-mcp-gateway
       key: MCP_GATEWAY_TOKEN
+# Synced from Vault (kv/holmesgpt/litellm) via health-checks companion chart
+- name: LITELLM_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: holmesgpt-litellm
+      key: LITELLM_API_KEY
 
 modelList:
   # Trialing qwen3:30b-a3b (MoE, ~3B active) for faster, more consistent agentic
   # investigations on the Strix Halo APU node vs the dense qwen2.5:32b.
-  ollama-qwen3:
-    model: "ollama_chat/qwen3:30b-a3b"
+  # Via LiteLLM (alias qwen3-30b -> Ollama qwen3:30b-a3b on bock). No cloud
+  # fallback: investigations stay on local models (task #159).
+  qwen3-30b:
+    model: "openai/qwen3-30b"
+    api_base: "http://litellm.litellm.svc.cluster.local:4000/v1"
+    api_key: "{{ env.LITELLM_API_KEY }}"
     temperature: 0
 
 # MCP Gateway - provides ArgoCD, OPNsense, and Haystack RAG tools

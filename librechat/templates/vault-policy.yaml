@@ -27,6 +27,11 @@ spec:
       capabilities = ["read"]
     }
 
+    # Allow reading the LiteLLM virtual key
+    path "kv/data/{{ .Values.vault.secrets.litellm }}" {
+      capabilities = ["read"]
+    }
+
     # Allow reading MongoDB credentials
     path "kv/data/{{ .Values.vault.secrets.mongodb }}" {
       capabilities = ["read"]

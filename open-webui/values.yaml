@@ -16,10 +16,15 @@ strategy:
 env:
 - name: OLLAMA_BASE_URL
   value: "http://ollama.ollama.svc.cluster.local:11434"
+# Chat goes through LiteLLM. OLLAMA_BASE_URL stays: an OpenAI-compatible
+# proxy can't do Ollama model management (pull/delete/modelfiles).
 - name: OPENAI_API_BASE_URL
-  value: "http://llama-cpp-service.llama.svc.cluster.local:8080/v1"
+  value: "http://litellm.litellm.svc.cluster.local:4000/v1"
 - name: OPENAI_API_KEY
-  value: "not-needed"
+  valueFrom:
+    secretKeyRef:
+      name: open-webui-simple-service-litellm
+      key: LITELLM_API_KEY
 - name: PORT
   value: "8080"
 
@@ -75,3 +80,11 @@ httproute:
   gateway:
     name: http-gateway
     namespace: kube-system
+
+# LiteLLM virtual key: vault kv put kv/open-webui/litellm LITELLM_API_KEY=sk-...
+vault:
+  enabled: true
+  kubernetes:
+    role: open-webui
+  secrets:
+    litellm: "open-webui/litellm"

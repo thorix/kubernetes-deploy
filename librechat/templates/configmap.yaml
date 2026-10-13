@@ -23,6 +23,20 @@ data:
 
       # Custom endpoints for llama.cpp and other local models
       custom:
+        {{- if .Values.endpoints.litellm.enabled }}
+        - name: "LiteLLM"
+          apiKey: "${LITELLM_API_KEY}"
+          baseURL: "{{ .Values.endpoints.litellm.baseURL }}"
+          models:
+            default:
+              - "{{ .Values.endpoints.litellm.defaultModel }}"
+            fetch: true
+          titleConvo: true
+          titleModel: "{{ .Values.endpoints.litellm.titleModel }}"
+          modelDisplayLabel: "LiteLLM"
+          dropParams:
+            - "user"
+        {{- end }}
         {{- if .Values.endpoints.llamacpp.enabled }}
         - name: "llama.cpp"
           apiKey: "not-needed"

@@ -48,18 +48,26 @@ endpoints:
       - "claude-3-5-sonnet-20241022"
       - "claude-3-5-haiku-20241022"
 
-  # Local llama.cpp server
-  llamacpp:
+  # LiteLLM gateway - all local models (Ollama + llama.cpp) via one endpoint.
+  # Virtual key: vault kv put kv/librechat/litellm LITELLM_API_KEY=sk-...
+  litellm:
     enabled: true
+    baseURL: "http://litellm.litellm.svc.cluster.local:4000/v1"
+    defaultModel: "qwen3-30b"
+    titleModel: "qwen2.5-7b"
+
+  # Local llama.cpp server (direct; superseded by litellm)
+  llamacpp:
+    enabled: false
     baseURL: "http://llama-cpp-service.llama.svc.cluster.local:8080/v1"
     # Models available on your llama.cpp server
     models:
       - "llama3"
       - "mistral"
 
-  # Ollama server
+  # Ollama server (direct; superseded by litellm)
   ollama:
-    enabled: true
+    enabled: false
     baseURL: "http://ollama.ollama.svc.cluster.local:11434"
     # Default model (required), additional models fetched dynamically
     defaultModel: "llama3"
@@ -82,6 +90,8 @@ vault:
   secrets:
     # Anthropic API key: vault kv put kv/librechat/anthropic ANTHROPIC_API_KEY=sk-ant-...
     anthropic: librechat/anthropic
+    # LiteLLM virtual key: vault kv put kv/librechat/litellm LITELLM_API_KEY=sk-...
+    litellm: librechat/litellm
     # MongoDB credentials: vault kv put kv/librechat/mongodb username=librechat password=...
     mongodb: librechat/mongodb
     # JWT secret for sessions: vault kv put kv/librechat/jwt JWT_SECRET=... JWT_REFRESH_SECRET=...
