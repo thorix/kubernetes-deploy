@@ -1,0 +1,10 @@
+# LiteLLM - one OpenAI-compatible endpoint in front of Ollama, llama.cpp and
+# Anthropic. Postgres holds virtual keys/spend; models come from config.yaml.
+namespace: litellm
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../litellm/values.postgres.yaml
+- path: simple-service
+  valuesFiles:
+  - ../litellm/values.yaml
