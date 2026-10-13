@@ -471,6 +471,32 @@ server:
           annotations:
             summary: "HolmesGPT check {{ $labels.namespace }}/{{ $labels.name }} has never recorded a successful run"
             description: "The check exists and is scheduled but has no lastSuccessfulTime at all, so the staleness rule above has no timestamp to compare against and stays blind to it."
+      - name: litellm
+        rules:
+        - alert: LiteLLMProxyDown
+          expr: kube_deployment_status_replicas_available{namespace="litellm", deployment="litellm"} < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "LiteLLM proxy has no available replicas"
+            description: "librechat, open-webui and HolmesGPT all send model calls through LiteLLM, so chat and alert investigations are down with it. Check: kubectl get pods -n litellm; kubectl logs -n litellm deploy/litellm"
+        - alert: LiteLLMModelBackendOutage
+          expr: litellm_deployment_state == 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "LiteLLM reports a complete outage for {{ $labels.litellm_model_name }}"
+            description: "Every recent call to this backend failed. Ollama and llama.cpp both run on bock, so check that node first; Anthropic failures are usually billing (credit balance)."
+        - alert: LiteLLMHighFailureRate
+          expr: sum(rate(litellm_proxy_failed_requests_metric_total[10m])) / sum(rate(litellm_proxy_total_requests_metric_total[10m])) > 0.2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value | humanizePercentage }} of LiteLLM requests are failing"
+            description: "Break it down by model and status with litellm_proxy_failed_requests_metric_total, or read the proxy logs: kubectl logs -n litellm deploy/litellm"
       - name: disk-health
         rules:
         - alert: SmartCounterIncreasing
