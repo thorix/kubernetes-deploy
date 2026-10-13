@@ -17,6 +17,9 @@ args:
 - /app/config/config.yaml
 - --port
 - "4000"
+# Separate unauthenticated metrics process; /metrics on 4000 needs a key.
+- --prometheus_metrics_port
+- "4001"
 
 containerPort: 4000
 
@@ -27,8 +30,8 @@ envFrom:
 
 podAnnotations:
   prometheus.io/scrape: "true"
-  prometheus.io/port: "4000"
-  prometheus.io/path: "/metrics/"
+  prometheus.io/port: "4001"
+  prometheus.io/path: "/metrics"
 
 service:
   port: 4000
@@ -92,12 +95,17 @@ networkPolicy:
       - matchLabels:
           k8s:io.kubernetes.pod.namespace: n8n
       - matchLabels:
-          k8s:io.kubernetes.pod.namespace: victoriametrics
-      - matchLabels:
           k8s:io.kubernetes.pod.namespace: litellm
       toPorts:
       - ports:
         - port: "4000"
+          protocol: TCP
+    - fromEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: victoriametrics
+      toPorts:
+      - ports:
+        - port: "4001"
           protocol: TCP
 
 configMap:
