@@ -6,7 +6,7 @@ fullnameOverride: immich-public-proxy
 
 image:
   repository: alangrainger/immich-public-proxy
-  tag: "3.4.0"
+  tag: "4.0.0"
   pullPolicy: IfNotPresent
 
 replicaCount: 1
