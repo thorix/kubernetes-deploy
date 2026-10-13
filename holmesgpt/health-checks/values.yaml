@@ -13,6 +13,7 @@ vault:
     audience: vault
     tokenTTL: 86400
   secrets:
+    # Holmes' agentgateway API key (MCP_GATEWAY_TOKEN); path name predates agentgateway
     mcp-gateway: holmesgpt/mcp-gateway
     # LiteLLM virtual key (LITELLM_API_KEY)
     litellm: holmesgpt/litellm

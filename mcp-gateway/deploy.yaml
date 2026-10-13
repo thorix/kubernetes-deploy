@@ -1,7 +1,0 @@
-# mcp-gateway deployment
-
-namespace: mcp-gateway
-
-helm:
-- valuesFiles:
-  - values.yaml
