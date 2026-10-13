@@ -23,11 +23,17 @@ mcp-stack:
 
     image:
       repository: ghcr.io/ibm/mcp-context-forge
-      # Bumped from 1.0.0-BETA-2 to pick up tool-import / schema-validation
-      # fixes (PR #2342, etc.) — BETA-2 silently dropped 11 of grafana-mcp's
-      # 50 tools (including update_dashboard) during federation. See issue
-      # https://github.com/IBM/mcp-context-forge/issues/4304.
-      tag: "v1.0.0-RC-3"
+      # v1.0.11 (first GA-line release we run). Upgrading from RC-3 required
+      # two new secrets, both now in Vault at kv/mcp-gateway/gateway-secrets:
+      #   AUTH_ENCRYPTION_SECRET  - v1.0.8 rejects a weak/default value at
+      #                             startup. RC-3 had been running on the
+      #                             built-in default; nothing was encrypted with
+      #                             it (no gateway auth_value/oauth_config rows),
+      #                             so no re-encryption was needed.
+      #   DEFAULT_USER_PASSWORD   - v1.0.10 rejects a default password when
+      #                             EMAIL_AUTH_ENABLED (true by default).
+      # Schema migrations run at gateway startup (migration.enabled is false).
+      tag: "v1.0.11"
       pullPolicy: IfNotPresent
 
     # The image requires an x86-64-v3 CPU, so this is pinned to a specific node.
@@ -160,9 +166,10 @@ mcp-stack:
         successThreshold: 1
         failureThreshold: 3
 
-  # Disable fast-time-server ingress (use HTTPRoute)
+  # The sample fast-time-server was removed upstream in v1.0.9, and it served
+  # nothing we use (one replica sat in Error for weeks).
   mcpFastTimeServer:
-    enabled: true
+    enabled: false
     ingress:
       enabled: false
 
