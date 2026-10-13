@@ -1,0 +1,151 @@
+# agentgateway (Linux Foundation, Apache-2.0) - standalone MCP gateway.
+#
+# One route multiplexes every MCP server; tools are exposed as
+# <target>_<tool> (prefixMode: always). Clients authenticate with an API key
+# (Authorization: Bearer <key>). Only SHA-256 hashes live here; the keys are in
+# Vault at kv/agentgateway/keys.
+
+nameOverride: agentgateway
+
+image:
+  repository: ghcr.io/agentgateway/agentgateway
+  tag: "v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c"
+
+args:
+- -f
+- /config/config.yaml
+
+containerPort: 3000
+
+service:
+  port: 80
+  targetPort: 3000
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "15020"
+  prometheus.io/path: "/metrics"
+
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  readiness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 512Mi
+
+serviceAccount:
+  create: true
+
+# Public route (hostname) is set per cluster in the config overlay.
+httproute:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  ingress:
+    # Cilium gateway / tailscale for the HTTPRoute
+    gatewayOnly: true
+    customRules:
+    - fromEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: holmesgpt
+      toPorts:
+      - ports:
+        - port: "3000"
+          protocol: TCP
+    - fromEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: victoriametrics
+      toPorts:
+      - ports:
+        - port: "15020"
+          protocol: TCP
+        - port: "3000"
+          protocol: TCP
+
+configMap:
+  enabled: true
+  mountPath: /config
+  files:
+    config.yaml: |
+      config:
+        statsAddr: 0.0.0.0:15020
+        readinessAddr: 0.0.0.0:15021
+        adminAddr: "off"
+      binds:
+      - port: 3000
+        listeners:
+        - routes:
+          # Unauthenticated liveness for the blackbox probe.
+          - name: health
+            matches:
+            - path:
+                exact: /health
+            policies:
+              directResponse:
+                status: 200
+                body: "ok"
+          - name: mcp
+            policies:
+              cors:
+                allowOrigins: ["*"]
+                allowHeaders: ["*"]
+                exposeHeaders: ["Mcp-Session-Id"]
+              apiKey:
+                mode: strict
+                location:
+                  header:
+                    name: Authorization
+                    prefix: "Bearer "
+                keys:
+                - keyHash: "sha256:8c1683460b275117eeae3ef71dc788d698044843df46a1ae92f6c07136f2d8ac"
+                  metadata: {client: holmesgpt}
+                - keyHash: "sha256:44bedd178ca90db68d5e0a937e9d6de0e98740be4654d6eb86c3860ea3415fe7"
+                  metadata: {client: claude-code}
+              mcpAuthorization:
+                rules:
+                # OPNsense is read-only diagnostics: hide every write tool
+                # (same set ContextForge disabled).
+                - allow: >-
+                    !(mcp.tool.target == "opnsense" && mcp.tool.name in [
+                    "auth_manage", "captiveportal_manage", "cron_manage",
+                    "dhcpv6_manage", "dhcrelay_manage", "dnsmasq_manage",
+                    "firmware_manage", "ids_manage", "ipsec_manage",
+                    "kea_manage", "monit_manage", "openvpn_manage",
+                    "routes_manage", "routing_manage", "syslog_manage",
+                    "trafficshaper_manage", "trust_manage", "wireguard_manage"])
+            backends:
+            - mcp:
+                prefixMode: always
+                # One MCP server down must not take the whole gateway down.
+                failureMode: failOpen
+                statefulMode: stateless
+                targets:
+                - name: argocd
+                  mcp:
+                    host: http://argocd-mcp-simple-service.argocd-mcp.svc.cluster.local:3000/mcp
+                - name: grafana
+                  mcp:
+                    host: http://grafana-mcp-simple-service.grafana-mcp.svc.cluster.local:3000/mcp
+                - name: opnsense
+                  mcp:
+                    host: http://opnsense-mcp-simple-service.opnsense-mcp.svc.cluster.local:3000/mcp
+                - name: easysmart
+                  mcp:
+                    host: http://easysmart-mcp-simple-service.easysmart-mcp.svc.cluster.local:3000/mcp
+                - name: haystack
+                  sse:
+                    host: http://haystack-hayhooks.haystack.svc.cluster.local:1417/sse

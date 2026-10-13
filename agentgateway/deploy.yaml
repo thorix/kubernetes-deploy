@@ -1,0 +1,8 @@
+# agentgateway - MCP gateway multiplexing the cluster's MCP servers behind one
+# endpoint. Replaces mcp-gateway (IBM ContextForge). Stateless: config is a
+# file in git, no database.
+namespace: agentgateway
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../agentgateway/values.yaml
