@@ -63,14 +63,15 @@ modelList:
     api_key: "{{ env.LITELLM_API_KEY }}"
     temperature: 0
 
-# MCP Gateway - provides ArgoCD, OPNsense, and Haystack RAG tools
-# Connects to the MCP Context Forge gateway (all registered servers)
+# MCP gateway (agentgateway) - ArgoCD, Grafana, OPNsense (read-only),
+# easysmart PoE switch and Haystack RAG tools, prefixed <server>_<tool>.
+# MCP_GATEWAY_TOKEN is Holmes' agentgateway API key.
 mcp_servers:
   ops-gateway:
-    description: "MCP gateway providing ArgoCD, OPNsense, and Haystack RAG tools for cluster operations"
+    description: "MCP gateway providing ArgoCD, Grafana, OPNsense, PoE switch and Haystack RAG tools for cluster operations"
     config:
-      url: "http://mcp-gateway-mcpgateway.mcp-gateway.svc.cluster.local/sse"
-      mode: "sse"
+      url: "http://agentgateway.agentgateway.svc.cluster.local/mcp"
+      mode: "streamable-http"
       extra_headers:
         Authorization: "Bearer {{ env.MCP_GATEWAY_TOKEN }}"
       verify_ssl: false
