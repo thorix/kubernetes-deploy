@@ -47,6 +47,13 @@ podAnnotations:
 
 service:
   port: 4000
+  # Listed without a link: LiteLLM is internal-only (admin UI unexposed).
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "LiteLLM"
+    gethomepage.dev/description: "Model gateway for chat apps and Holmes (internal only)"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "mdi-router-network"
 
 probes:
   enabled: true

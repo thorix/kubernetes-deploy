@@ -20,6 +20,13 @@ containerPort: 3000
 service:
   port: 80
   targetPort: 3000
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "MCP Gateway"
+    gethomepage.dev/description: "agentgateway - MCP tools for agents (no UI)"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "mdi-api"
+    gethomepage.dev/href: "http://mcp.lan/health"
 
 podAnnotations:
   prometheus.io/scrape: "true"
