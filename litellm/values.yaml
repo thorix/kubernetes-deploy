@@ -25,8 +25,20 @@ containerPort: 4000
 
 envFrom:
 - secretRef:
-    # LITELLM_MASTER_KEY, LITELLM_SALT_KEY, DATABASE_URL, ANTHROPIC_API_KEY
+    # LITELLM_MASTER_KEY, LITELLM_SALT_KEY, DATABASE_URL, ANTHROPIC_API_KEY,
+    # OTEL_HEADERS ("Authorization=Bearer <Lens tracing key>")
     name: litellm-app
+
+# Every request is traced to Lens over OTLP. Swap for the native Lens
+# connection (LITELLM_LENS_URL / LITELLM_LENS_SERVICE_TOKEN) once a LiteLLM
+# release ships it - that also records costs against traces.
+env:
+- name: OTEL_EXPORTER
+  value: otlp_http
+- name: OTEL_ENDPOINT
+  value: http://lens.lens.svc.cluster.local:4318/v1/traces
+- name: OTEL_SERVICE_NAME
+  value: litellm
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -162,7 +174,7 @@ configMap:
           api_key: os.environ/ANTHROPIC_API_KEY
 
       litellm_settings:
-        callbacks: ["prometheus"]
+        callbacks: ["prometheus", "otel"]
         drop_params: true
         # Holmes investigations can run long; holmes-alert-relay waits 900s.
         request_timeout: 900
