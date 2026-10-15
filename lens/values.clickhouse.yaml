@@ -1,0 +1,122 @@
+# ClickHouse for Lens: single server with embedded Keeper (Lens needs
+# KeeperMap). Same image, settings and Keeper config as upstream helm/lens.
+workloadType: StatefulSet
+# -> lens-clickhouse, selector app.kubernetes.io/name=clickhouse
+nameOverride: clickhouse
+
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "26.9.6.6@sha256:eb4870e7ca7ed70c259eebfcfbee6cf797017f6b5436c2926bbbfe3d4d28486e"
+
+containerPort: 8123
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+env:
+- name: CLICKHOUSE_USER
+  value: default
+- name: CLICKHOUSE_DB
+  value: lens
+- name: CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: lens-clickhouse-app
+      key: CLICKHOUSE_PASSWORD
+- name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+  value: "1"
+
+service:
+  port: 8123
+
+probes:
+  enabled: true
+  liveness:
+    path: /ping
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 3
+  readiness:
+    path: /ping
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+serviceAccount:
+  create: true
+
+volumeClaimTemplates:
+- name: data
+  mountPath: /var/lib/clickhouse
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  size: 20Gi
+
+# Keeper config, mounted as one file so the image's own config.d stays.
+configMap:
+  enabled: true
+  mountPath: /lens-config
+  files:
+    lens-keeper.xml: |
+      <clickhouse>
+        <keeper_server>
+          <tcp_port>9181</tcp_port>
+          <server_id>1</server_id>
+          <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+          <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+          <coordination_settings>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+            <quorum_reads>true</quorum_reads>
+          </coordination_settings>
+          <raft_configuration>
+            <server><id>1</id><hostname>127.0.0.1</hostname><port>9234</port></server>
+          </raft_configuration>
+        </keeper_server>
+        <zookeeper><node><host>127.0.0.1</host><port>9181</port></node></zookeeper>
+        <keeper_map_path_prefix>/lens/keeper-map</keeper_map_path_prefix>
+      </clickhouse>
+volumeMounts:
+- name: config
+  mountPath: /etc/clickhouse-server/config.d/lens-keeper.xml
+  subPath: lens-keeper.xml
+  readOnly: true
+
+vault:
+  enabled: true
+  kubernetes:
+    role: lens-clickhouse
+  secrets:
+    # Keys: LENS_ADMIN_TOKEN, CLICKHOUSE_PASSWORD
+    app: "lens/app"
+
+# Only Lens may reach ClickHouse; never exposed.
+networkPolicy:
+  enabled: true
+  ingress:
+    customRules:
+    - fromEndpoints:
+      - matchLabels:
+          app.kubernetes.io/name: lens
+          app.kubernetes.io/instance: lens
+      toPorts:
+      - ports:
+        - port: "8123"
+          protocol: TCP

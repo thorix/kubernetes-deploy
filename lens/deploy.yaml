@@ -1,0 +1,12 @@
+# LiteLLM Lens - agent trace recording, investigations and datasets.
+# Mirrors the upstream helm/lens chart (bundled ClickHouse + Keeper), but as
+# simple-service releases so secrets come from Vault: the upstream chart
+# generates passwords with a live `lookup`, which ArgoCD can't render stably.
+namespace: lens
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../lens/values.clickhouse.yaml
+- path: simple-service
+  valuesFiles:
+  - ../lens/values.yaml

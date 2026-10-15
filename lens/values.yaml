@@ -1,0 +1,102 @@
+# LiteLLM Lens (BerriAI/lens) - standalone mode. UI at /ui/, OTLP traces at
+# /v1/traces (Authorization: Bearer <tracing key created in the UI).
+#
+# No published image yet: built from source (deploy/runtime/Dockerfile,
+# target runtime) at the commit in the tag and pushed to the local registry.
+
+# -> resources named "lens", selector app.kubernetes.io/name=lens
+nameOverride: lens
+
+image:
+  repository: harbor.lan/library/lens
+  tag: "9975e13@sha256:12ada064df9b1fabcb2f1e43690fa40bc52a9a89fbc736bb98afb476d8e8f0c9"
+
+containerPort: 4318
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Plain settings as an envFrom ConfigMap (a map, so the cluster overlay can
+# override single keys such as the public URL).
+configMap:
+  enabled: true
+  data:
+    LENS_MODE: standalone
+    LENS_PUBLIC_URL: "http://lens.lan"
+    LITELLM_LENS_PUBLIC_URL: "http://lens.lan"
+    CLICKHOUSE_HOST: lens-clickhouse
+    CLICKHOUSE_USER: default
+    CLICKHOUSE_DATABASE: lens
+    AGENT_TRACING_RETENTION_DAYS: "14"
+
+env:
+- name: LENS_ADMIN_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: lens-app
+      key: LENS_ADMIN_TOKEN
+- name: CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: lens-app
+      key: CLICKHOUSE_PASSWORD
+
+service:
+  port: 4318
+
+probes:
+  enabled: true
+  liveness:
+    path: /health/live
+    port: http
+    initialDelaySeconds: 30
+    periodSeconds: 20
+  readiness:
+    path: /health/ready
+    port: http
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 2Gi
+
+serviceAccount:
+  create: true
+
+volumeMounts:
+- name: tmp
+  mountPath: /tmp
+volumes:
+- name: tmp
+  emptyDir:
+    medium: Memory
+    sizeLimit: 1Gi
+
+vault:
+  enabled: true
+  kubernetes:
+    role: lens
+  secrets:
+    app: "lens/app"
+
+httproute:
+  enabled: true
+  hostname: ""
+  gateway:
+    name: http-gateway
+    namespace: kube-system
