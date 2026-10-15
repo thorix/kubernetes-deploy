@@ -67,7 +67,12 @@ data:
               href: https://youtube.com
               description: Video platform
 
+  {{- if .Values.staticServices }}
+  services.yaml: |
+    {{- toYaml .Values.staticServices | nindent 4 }}
+  {{- else }}
   services.yaml: ""
+  {{- end }}
 
   kubernetes.yaml: |
     mode: cluster

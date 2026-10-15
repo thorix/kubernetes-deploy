@@ -41,3 +41,8 @@ securityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
+
+# Static services.yaml entries, for apps with no HTTPRoute to discover them by
+# (homepage reads gethomepage.dev annotations from HTTPRoutes). Same format as
+# homepage's services.yaml; groups merge with discovered ones of the same name.
+staticServices: []
