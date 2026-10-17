@@ -181,8 +181,10 @@ configMap:
           api_key: os.environ/ANTHROPIC_API_KEY
 
       # --- Nous Portal (OpenAI-compatible; ~430 hosted models, billed per token) ---
-      # Named picks show up in the chat apps' model lists; anything else on the
-      # portal is reachable as nous/<portal model id>.
+      # Named picks only. A nous/* wildcard would work for calls, but LiteLLM
+      # fills /v1/models for an openai/* wildcard from its built-in OpenAI
+      # catalogue - ~220 fake "nous/gpt-..." ids flooding the chat apps' pickers.
+      # Add a portal model: copy an entry, model: openai/<portal model id>.
       - model_name: claude-sonnet-5.5
         litellm_params:
           model: openai/anthropic/claude-sonnet-5.5
@@ -216,11 +218,6 @@ configMap:
       - model_name: kimi-k3
         litellm_params:
           model: openai/moonshotai/kimi-k3
-          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
-          api_key: os.environ/NOUS_API_KEY
-      - model_name: "nous/*"
-        litellm_params:
-          model: "openai/*"
           api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
           api_key: os.environ/NOUS_API_KEY
 
