@@ -26,7 +26,7 @@ containerPort: 4000
 envFrom:
 - secretRef:
     # LITELLM_MASTER_KEY, LITELLM_SALT_KEY, DATABASE_URL, ANTHROPIC_API_KEY,
-    # OTEL_HEADERS ("Authorization=Bearer <Lens tracing key>")
+    # NOUS_API_KEY, OTEL_HEADERS ("Authorization=Bearer <Lens tracing key>")
     name: litellm-app
 
 # Every request is traced to Lens over OTLP. Swap for the native Lens
@@ -179,6 +179,50 @@ configMap:
         litellm_params:
           model: "anthropic/claude-*"
           api_key: os.environ/ANTHROPIC_API_KEY
+
+      # --- Nous Portal (OpenAI-compatible; ~430 hosted models, billed per token) ---
+      # Named picks show up in the chat apps' model lists; anything else on the
+      # portal is reachable as nous/<portal model id>.
+      - model_name: claude-sonnet-5.5
+        litellm_params:
+          model: openai/anthropic/claude-sonnet-5.5
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: claude-opus-5.5
+        litellm_params:
+          model: openai/anthropic/claude-opus-5.5
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: claude-haiku-5.5
+        litellm_params:
+          model: openai/anthropic/claude-haiku-5.5
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: gpt-5.2
+        litellm_params:
+          model: openai/openai/gpt-5.2
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: gemini-3.1-pro
+        litellm_params:
+          model: openai/google/gemini-3.1-pro-preview
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: deepseek-v4-pro
+        litellm_params:
+          model: openai/deepseek/deepseek-v4-pro
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: kimi-k3
+        litellm_params:
+          model: openai/moonshotai/kimi-k3
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
+      - model_name: "nous/*"
+        litellm_params:
+          model: "openai/*"
+          api_base: https://inference-api.nousresearch.com/v1  # hygiene:allow (public vendor endpoint)
+          api_key: os.environ/NOUS_API_KEY
 
       litellm_settings:
         callbacks: ["prometheus", "otel"]
