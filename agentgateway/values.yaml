@@ -156,3 +156,113 @@ configMap:
                 - name: haystack
                   sse:
                     host: http://haystack-hayhooks.haystack.svc.cluster.local:1417/sse
+                # REST API exposed as MCP tools from an OpenAPI spec (below);
+                # no separate MCP server to run.
+                - name: languagetool
+                  openapi:
+                    host: http://languagetool.languagetool.svc.cluster.local:8010
+                    schema:
+                      file: /config/languagetool-openapi.json
+    # Minimal OpenAPI 3 spec for LanguageTool (its published spec is Swagger 2.0).
+    languagetool-openapi.json: |
+      {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "LanguageTool",
+          "version": "6.8",
+          "description": "Self-hosted LanguageTool grammar, spelling and style checker."
+        },
+        "paths": {
+          "/v2/check": {
+            "get": {
+              "operationId": "check_text",
+              "summary": "Check text for grammar, spelling and style problems. Returns each match with its message, offset, length, rule and suggested replacements.",
+              "parameters": [
+                {
+                  "name": "text",
+                  "in": "query",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  },
+                  "description": "The text to check."
+                },
+                {
+                  "name": "language",
+                  "in": "query",
+                  "required": true,
+                  "schema": {
+                    "type": "string",
+                    "default": "auto"
+                  },
+                  "description": "Language code such as en-US, en-GB, de-DE, or auto to detect it."
+                },
+                {
+                  "name": "motherTongue",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "string"
+                  },
+                  "description": "Writer's native language code, enables false-friend checks."
+                },
+                {
+                  "name": "level",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "picky"
+                    ]
+                  },
+                  "description": "picky enables additional style rules."
+                },
+                {
+                  "name": "disabledRules",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "string"
+                  },
+                  "description": "Comma-separated rule IDs to skip."
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Check result",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/v2/languages": {
+            "get": {
+              "operationId": "list_languages",
+              "summary": "List the languages LanguageTool supports, with their codes.",
+              "responses": {
+                "200": {
+                  "description": "Languages",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }

@@ -1,0 +1,73 @@
+# LanguageTool HTTP server (erikvl87/languagetool), API at /v2/check.
+# No auth: reachable only through the LAN gateway and agentgateway.
+
+# -> resources named "languagetool", selector app.kubernetes.io/name=languagetool
+nameOverride: languagetool
+
+image:
+  repository: erikvl87/languagetool
+  tag: "6.8@sha256:ef8fa12cbd485166c9ceeb7139d76d56d07707a624da6bb1fc1fbb5411750527"
+
+containerPort: 8010
+
+env:
+- name: Java_Xms
+  value: "512m"
+- name: Java_Xmx
+  value: "1536m"
+# Warm the rule pipelines at startup so the first check isn't slow.
+- name: langtool_pipelinePrewarming
+  value: "true"
+
+service:
+  port: 8010
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "LanguageTool"
+    gethomepage.dev/description: "Grammar and style checker"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "languagetool.png"
+    gethomepage.dev/href: "http://languagetool.lan"
+
+probes:
+  enabled: true
+  liveness:
+    path: /v2/languages
+    port: http
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+  readiness:
+    path: /v2/languages
+    port: http
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 10
+    failureThreshold: 12
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 768Mi
+  limits:
+    memory: 2Gi
+
+serviceAccount:
+  create: true
+
+httproute:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+  ingress:
+    # Cilium gateway / tailscale for the HTTPRoute
+    gatewayOnly: true
+    customRules:
+    - fromEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: agentgateway
+      toPorts:
+      - ports:
+        - port: "8010"
+          protocol: TCP

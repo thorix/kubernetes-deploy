@@ -1,0 +1,8 @@
+# LanguageTool - self-hosted grammar/style checker (rule-based, no LLM).
+# Used directly by the browser extension / editors, and by LLM agents as an
+# MCP tool through agentgateway (OpenAPI target, see agentgateway/values.yaml).
+namespace: languagetool
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../languagetool/values.yaml
