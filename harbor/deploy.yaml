@@ -2,40 +2,6 @@
 
 namespace: harbor
 
-# The harbor chart generates these secrets with randAlphaNum/genCA on every
-# render (it relies on Helm lookup, which Argo CD does not run), and stamps their
-# hash into the pod templates. Without these ignores, server-side diff sees
-# every render as drift and self-heal re-syncs in a loop, rotating the secrets
-# and restarting core/jobservice/registry each time. Durable fix: pin them via
-# the chart's existing-secret values.
-ignoreDifferences:
-- group: ""
-  kind: Secret
-  name: harbor-core
-  jsonPointers:
-  - /data
-- group: ""
-  kind: Secret
-  name: harbor-jobservice
-  jsonPointers:
-  - /data
-- group: ""
-  kind: Secret
-  name: harbor-registry
-  jsonPointers:
-  - /data
-- group: ""
-  kind: Secret
-  name: harbor-registry-htpasswd
-  jsonPointers:
-  - /data
-- group: apps
-  kind: Deployment
-  jqPathExpressions:
-  - '.spec.template.metadata.annotations."checksum/secret"'
-  - '.spec.template.metadata.annotations."checksum/secret-core"'
-  - '.spec.template.metadata.annotations."checksum/secret-jobservice"'
-
 helm:
 - valuesFiles:
   - values.yaml
