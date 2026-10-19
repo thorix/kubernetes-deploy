@@ -2,6 +2,16 @@
 
 namespace: tailscale
 
+# Egress Services (templates/egress-services.yaml) are rewritten by the operator
+# into ExternalName Services pointing at its proxy pod; those two fields are the
+# operator's, not Git's.
+ignoreDifferences:
+- group: ""
+  kind: Service
+  jsonPointers:
+  - /spec/type
+  - /spec/externalName
+
 helm:
 - valuesFiles:
   - values.yaml
