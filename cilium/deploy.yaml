@@ -16,6 +16,11 @@ ignoreDifferences:
   name: hubble-server-certs
   jsonPointers:
   - /data
+- group: ""
+  kind: Secret
+  name: hubble-relay-client-certs
+  jsonPointers:
+  - /data
 
 helm:
 - chart: cilium
