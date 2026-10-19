@@ -7,7 +7,6 @@ metadata:
     {{- include "tailscale-operator-wrapper.labels" . | nindent 4 }}
 spec:
   hostname: {{ .Values.connector.hostname }}
-  acceptRoutes: {{ .Values.connector.acceptRoutes | default false }}
   subnetRouter:
     advertiseRoutes:
       {{- range .Values.connector.routes }}
