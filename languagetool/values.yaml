@@ -71,3 +71,147 @@ networkPolicy:
       - ports:
         - port: "8010"
           protocol: TCP
+
+# BEGIN custom-dictionary
+# Custom dictionary, one word or phrase per line: spelling_custom.txt is accepted,
+# prohibit_custom.txt is flagged as a misspelling. Each file is mounted by subPath
+# over the image's empty copy, so the rest of the hunspell dir stays intact.
+# subPath mounts never see ConfigMap updates; the dictionary-sha annotation
+# changes with the lists and rolls the pod.
+configMap:
+  enabled: true
+  # The chart mounts the whole ConfigMap here; unused, only the subPath mounts matter.
+  mountPath: /etc/languagetool-dict
+  files:
+    spelling_custom.txt: |
+      agentgateway
+      AIMD
+      AIOps
+      Alertmanager
+      Amazon Bedrock
+      Apache DevLake
+      Argo CD
+      Artifactory
+      Backblaze
+      blackbox
+      cert-manager
+      Cilium
+      ClickHouse
+      ComfyUI
+      containerd
+      ContextForge
+      cpp
+      DataPacket
+      dbt
+      DEF CON
+      DevLake
+      DevOpsDays
+      Elasticsearch
+      evals
+      FinOps
+      GitHub
+      GitLab
+      GitOps
+      GitOps-managed
+      HashiCorp
+      Hermes
+      HolmesGPT
+      homelab
+      IaC
+      Istio
+      JavaScript
+      Karpenter
+      KEDA
+      kops
+      kube-state
+      KubeCon
+      kubelet
+      Langfuse
+      LibreChat
+      LiteLLM
+      llama.cpp
+      Loki
+      Milvus
+      Mirantis
+      NATS
+      NotReady
+      Ollama
+      Open WebUI
+      OpenAPI
+      OpenSearch
+      OpenStack
+      OpenTelemetry
+      OPNsense
+      org-wide
+      PagerDuty
+      PodDisruptionBudget
+      PoE
+      PostgreSQL
+      PuppetConf
+      querier
+      Quickwit
+      Quickwit-based
+      Redpanda
+      restic
+      runbook
+      SHA
+      Siege
+      SLO
+      SnowFROC
+      Supermaven
+      Tailscale
+      Talos
+      Temporal
+      Thanos
+      Vanta
+      Vault-backed
+      VictoriaMetrics
+      WebRTC
+      WebUI
+      whisper.cpp
+      Wiz
+    prohibit_custom.txt: |
+      Alert Manager
+      AlertManager
+      Apache Devlake
+      Argo-CD
+      ArgoCD
+      ArgoCd
+      AWS Bedrock
+      Click House
+      Clickhouse
+      Comfy UI
+      Defcon
+      DefCon
+      DEFCON
+      Elastic Search
+      ElasticSearch
+      Github
+      Gitlab
+      Hashicorp
+      Javascript
+      Keda
+      Libre Chat
+      Open Telemetry
+      Open Web UI
+      Opentelemetry
+      OpenWebUI
+      Pagerduty
+      Postgresql
+      Red Panda
+      RedPanda
+      Victoria Metrics
+
+volumeMounts:
+- name: config
+  mountPath: /LanguageTool/org/languagetool/resource/en/hunspell/spelling_custom.txt
+  subPath: spelling_custom.txt
+  readOnly: true
+- name: config
+  mountPath: /LanguageTool/org/languagetool/resource/en/hunspell/prohibit_custom.txt
+  subPath: prohibit_custom.txt
+  readOnly: true
+
+podAnnotations:
+  languagetool.org/dictionary-sha: "182fa1adedcc"
+# END custom-dictionary
