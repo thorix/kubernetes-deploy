@@ -47,17 +47,6 @@ argocd:
   configs:
     params:
       server.insecure: true
-    # OCI Helm repositories
-    repositories:
-      ghcr-actions:
-        name: ghcr-actions
-        type: helm
-        url: ghcr.io/actions/actions-runner-controller-charts
-        enableOCI: "true"
-    # Additional accounts for API access
-    cm:
-      accounts.claude: apiKey
-      accounts.claude.enabled: "true"
       # Server-side diff: ArgoCD asks the API server for a server-side apply
       # dry-run and diffs against that, instead of comparing to
       # last-applied-configuration.
@@ -70,7 +59,21 @@ argocd:
       # HTTPRoute parentRefs/backendRefs (group/kind/weight) were the two shapes
       # hit here. Seven apps sat OutOfSync forever with nothing actually wrong,
       # which meant genuine drift on them would have been invisible.
+      #
+      # This is a controller flag: it must live in argocd-cmd-params-cm (here,
+      # configs.params). The controller ignores it in argocd-cm (configs.cm).
       controller.diff.server.side: "true"
+    # OCI Helm repositories
+    repositories:
+      ghcr-actions:
+        name: ghcr-actions
+        type: helm
+        url: ghcr.io/actions/actions-runner-controller-charts
+        enableOCI: "true"
+    # Additional accounts for API access
+    cm:
+      accounts.claude: apiKey
+      accounts.claude.enabled: "true"
     # RBAC configuration for accounts
     rbac:
       policy.csv: |
