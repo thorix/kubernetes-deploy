@@ -1,0 +1,88 @@
+# Pebble ring MCP bridge (Streamable HTTP MCP at /mcp, bearer MCP_BEARER_TOKEN).
+# Phase 1: in-cluster hello world. Public exposure for the Pebble cloud agent
+# comes later (tunnel hostname goes into MCP_ALLOWED_HOSTS).
+
+# -> resources named "pebble-bridge", selector app.kubernetes.io/name=pebble-bridge
+nameOverride: pebble-bridge
+
+image:
+  repository: harbor.lan/library/pebble-bridge
+  tag: "8d59491@sha256:62c73b9b66aae1a06ee96214796716498c417d73a3bce5de717beaf0ea900d65"
+
+containerPort: 8765
+
+env:
+- name: HERMES_API_URL
+  value: "http://hermes-agent-simple-service.hermes-agent.svc.cluster.local:8642/v1/chat/completions"
+- name: HERMES_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: pebble-bridge-credentials
+      key: HERMES_API_KEY
+- name: MCP_BEARER_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: pebble-bridge-credentials
+      key: MCP_BEARER_TOKEN
+# DNS-rebinding guard: Host headers the server accepts besides loopback.
+- name: MCP_ALLOWED_HOSTS
+  value: "pebble-bridge.pebble-bridge.svc.cluster.local:*,pebble-bridge.pebble-bridge.svc:*"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+volumeMounts:
+- name: tmp
+  mountPath: /tmp
+volumes:
+- name: tmp
+  emptyDir:
+    sizeLimit: 64Mi
+
+service:
+  port: 8765
+
+probes:
+  enabled: true
+  liveness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  readiness:
+    type: tcp
+    port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 96Mi
+  limits:
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+
+vault:
+  enabled: true
+  kubernetes:
+    role: pebble-bridge
+  secrets:
+    # Keys: HERMES_API_KEY (Hermes API_SERVER_KEY), MCP_BEARER_TOKEN
+    credentials: "pebble-bridge/credentials"
+
+networkPolicy:
+  enabled: true
+  ingress:
+    # Cilium gateway / tailscale, for the public route added later.
+    gatewayOnly: true

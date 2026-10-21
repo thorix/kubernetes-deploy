@@ -35,6 +35,12 @@ vault:
   refreshAfter: 1h
   secrets:
     admin: harbor/admin
+    # Internal secrets the chart would otherwise generate on every render (it
+    # relies on Helm lookup, which Argo CD does not run): secret, CSRF_KEY,
+    # JOBSERVICE_SECRET, REGISTRY_HTTP_SECRET, REGISTRY_PASSWD, REGISTRY_HTPASSWD.
+    internal: harbor/internal
+    # Token-signing keypair (tls.crt, tls.key) shared by core and registry.
+    token: harbor/token
   kubernetes:
     mountPath: kubernetes
     role: harbor
@@ -94,6 +100,11 @@ harbor:
 
   # Resource limits
   core:
+    # Pinned from Vault (vault.secrets.internal/token) so renders are
+    # deterministic and a sync never rotates them.
+    existingSecret: harbor-internal
+    existingXsrfSecret: harbor-internal
+    secretName: harbor-token
     resources:
       requests:
         cpu: 100m
@@ -110,6 +121,11 @@ harbor:
         memory: 256Mi
 
   registry:
+    # Pinned from Vault (vault.secrets.internal/token) so renders are
+    # deterministic and a sync never rotates them.
+    existingSecret: harbor-internal
+    credentials:
+      existingSecret: harbor-internal
     registry:
       resources:
         requests:
@@ -126,6 +142,9 @@ harbor:
           memory: 256Mi
 
   jobservice:
+    # Pinned from Vault (vault.secrets.internal/token) so renders are
+    # deterministic and a sync never rotates them.
+    existingSecret: harbor-internal
     resources:
       requests:
         cpu: 50m

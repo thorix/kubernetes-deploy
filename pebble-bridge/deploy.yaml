@@ -1,0 +1,8 @@
+# Pebble ring MCP bridge: the Pebble app's cloud agent calls these MCP tools;
+# ask_hermes forwards to the Hermes API server. Source: thorix/pebble-bridge
+# (fork of jcrabapple/pebble-index-mcp).
+namespace: pebble-bridge
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../pebble-bridge/values.yaml
