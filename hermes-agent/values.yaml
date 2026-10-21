@@ -89,6 +89,14 @@ extraContainers:
         value: "10000"
       - name: HERMES_GID
         value: "10000"
+      # Same key as the gateway. Without it this container's stage2 hook
+      # generates its own API_SERVER_KEY into the shared /opt/data/.env, which
+      # Hermes loads with override=True, so the gateway 401s every client.
+      - name: API_SERVER_KEY
+        valueFrom:
+          secretKeyRef:
+            name: hermes-agent-simple-service-credentials
+            key: API_SERVER_KEY
     volumeMounts:
       - name: data
         mountPath: /opt/data
