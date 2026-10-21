@@ -114,6 +114,8 @@ networkPolicy:
       - matchLabels:
           k8s:io.kubernetes.pod.namespace: n8n
       - matchLabels:
+          k8s:io.kubernetes.pod.namespace: hermes-agent
+      - matchLabels:
           k8s:io.kubernetes.pod.namespace: litellm
       toPorts:
       - ports:

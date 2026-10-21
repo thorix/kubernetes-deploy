@@ -18,28 +18,37 @@ env:
     value: "10000"
   - name: HERMES_GID
     value: "10000"
-  - name: NOUS_API_KEY
-    valueFrom:
-      secretKeyRef:
-        name: hermes-agent-simple-service-credentials
-        key: NOUS_API_KEY
-  # Model provider: Hermes's `openrouter` provider, pointed at Nous Portal's
-  # OpenAI-compatible inference endpoint (the key works as a plain bearer;
-  # chat completions verified 200). Without OPENROUTER_BASE_URL the provider
-  # calls openrouter.ai, which the egress jail correctly drops → timeout.
+  # Model provider: Hermes's `openrouter` provider (generic OpenAI-compatible
+  # client), pointed at the in-cluster LiteLLM gateway with Hermes's own
+  # LiteLLM virtual key. LiteLLM routes the alias to Nous Portal.
   - name: OPENROUTER_API_KEY
     valueFrom:
       secretKeyRef:
         name: hermes-agent-simple-service-credentials
-        key: NOUS_API_KEY
+        key: LITELLM_API_KEY
   - name: OPENROUTER_BASE_URL
-    value: "https://inference-api.nousresearch.com/v1"  # hygiene:allow
+    value: "http://litellm.litellm.svc.cluster.local:4000/v1"
   - name: OPENROUTER_MODEL
-    value: "anthropic/claude-sonnet-4.5"
+    value: "claude-sonnet-5.5"
+  # OpenAI-compatible API server: the front door for the Pebble ring bridge
+  # (and later other clients). In-cluster only; bearer API_SERVER_KEY.
+  - name: API_SERVER_ENABLED
+    value: "true"
+  - name: API_SERVER_HOST
+    value: "0.0.0.0"
+  - name: API_SERVER_PORT
+    value: "8642"
+  - name: API_SERVER_KEY
+    valueFrom:
+      secretKeyRef:
+        name: hermes-agent-simple-service-credentials
+        key: API_SERVER_KEY
 
-# Phase 0: no inbound. Access is `kubectl port-forward` only.
+# Phase 1: the API server is reachable in-cluster only (see networkPolicy).
+containerPort: 8642
 service:
-  enabled: false
+  enabled: true
+  port: 8642
 httproute:
   enabled: false
 probes:
@@ -117,13 +126,15 @@ networkPolicy:
   enabled: true
   ingress:
     gatewayOnly: false
-    # Deny-all ingress: an ingress rule present flips Cilium to default-deny for
-    # ingress; this admits only a sentinel label nothing carries, so no pod can
-    # initiate to Hermes. (port-forward bypasses netpol via the kubelet.)
+    # Only the Pebble ring bridge may call the API server.
     customRules:
       - fromEndpoints:
           - matchLabels:
-              io.cilium.k8s.policy.deny-sentinel: no-inbound
+              k8s:io.kubernetes.pod.namespace: pebble-bridge
+        toPorts:
+          - ports:
+              - port: "8642"
+                protocol: TCP
   egress:
     denyAll: true
     allowDNS: false   # we supply L7 DNS below (required for toFQDNs resolution)
@@ -141,12 +152,12 @@ networkPolicy:
             rules:
               dns:
                 - matchPattern: "*"
-      - toFQDNs:
-          # Model provider only. Hermes is idle (its digest task moved to the
-          # standalone news-digest service); no Slack/R2 egress needed.
-          - matchName: inference-api.nousresearch.com
-          - matchName: portal.nousresearch.com
+      # Models only, via the in-cluster LiteLLM gateway.
+      - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: litellm
+              app.kubernetes.io/name: litellm
         toPorts:
           - ports:
-              - port: "443"
+              - port: "4000"
                 protocol: TCP
