@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pebble-bridge-tailnet
+description: Tailscale Ingress (HTTPS on the tailnet) for the Pebble ring bridge
+type: application
+version: 0.1.0

@@ -6,3 +6,4 @@ helm:
 - path: simple-service
   valuesFiles:
   - ../pebble-bridge/values.yaml
+- path: pebble-bridge/tailnet

@@ -1,6 +1,8 @@
 # Pebble ring MCP bridge (Streamable HTTP MCP at /mcp, bearer MCP_BEARER_TOKEN).
-# Phase 1: in-cluster hello world. Public exposure for the Pebble cloud agent
-# comes later (tunnel hostname goes into MCP_ALLOWED_HOSTS).
+# The Pebble app on the phone is the MCP client (the cloud/on-device model
+# only picks tools), so the bridge is tailnet-only: no public route. Reached
+# through a Tailscale Ingress (tailnet/ chart), limited by tailnet ACL to the
+# phone, plus the bearer token.
 
 # -> resources named "pebble-bridge", selector app.kubernetes.io/name=pebble-bridge
 nameOverride: pebble-bridge
@@ -24,9 +26,14 @@ env:
     secretKeyRef:
       name: pebble-bridge-credentials
       key: MCP_BEARER_TOKEN
-# DNS-rebinding guard: Host headers the server accepts besides loopback.
-- name: MCP_ALLOWED_HOSTS
-  value: "pebble-bridge.pebble-bridge.svc.cluster.local:*,pebble-bridge.pebble-bridge.svc:*"
+
+# Plain settings as an envFrom ConfigMap (a map, so the cluster overlay can
+# override single keys). MCP_ALLOWED_HOSTS is the DNS-rebinding guard: Host
+# headers accepted besides loopback; the overlay adds the tailnet hostname.
+configMap:
+  enabled: true
+  data:
+    MCP_ALLOWED_HOSTS: "pebble-bridge.pebble-bridge.svc.cluster.local:*,pebble-bridge.pebble-bridge.svc:*"
 
 podSecurityContext:
   runAsNonRoot: true

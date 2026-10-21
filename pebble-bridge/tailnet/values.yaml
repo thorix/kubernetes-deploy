@@ -1,0 +1,8 @@
+# Tailnet node name -> https://<hostname>.<tailnet>.ts.net
+hostname: pebble-bridge
+# Dedicated tag so the tailnet policy can allow only the phone to reach it.
+# Must be owned by the operator's tag in the tailnet policy (tagOwners).
+tags: "tag:k8s-pebble-bridge"
+service:
+  name: pebble-bridge
+  port: 8765

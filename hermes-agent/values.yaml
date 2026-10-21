@@ -92,16 +92,21 @@ initContainers:
         p = "/opt/data/config.yaml"
         if not os.path.exists(p):
             print("no config.yaml yet; Hermes will create it - nothing to pin"); raise SystemExit
+        import json
         d = yaml.safe_load(open(p)) or {}
         want = {"provider": os.environ["MODEL_PROVIDER"],
                 "base_url": os.environ["MODEL_BASE_URL"],
                 "default": os.environ["MODEL_DEFAULT"]}
+        api_tools = json.loads(os.environ["API_SERVER_TOOLSETS"])
+        changed = False
         if d.get("model") != want:
-            d["model"] = want
+            d["model"] = want; changed = True
+        pt = d.setdefault("platform_toolsets", {})
+        if pt.get("api_server") != api_tools:
+            pt["api_server"] = api_tools; changed = True
+        if changed:
             yaml.safe_dump(d, open(p, "w"), sort_keys=False)
-            print("pinned model:", want)
-        else:
-            print("model already pinned:", want)
+        print("model:", d["model"], "| api_server toolsets:", pt["api_server"], "| changed:", changed)
     env:
       - name: MODEL_PROVIDER
         value: "openrouter"   # generic OpenAI-compatible client; key = OPENROUTER_API_KEY
@@ -109,6 +114,13 @@ initContainers:
         value: "http://litellm.litellm.svc.cluster.local:4000/v1"
       - name: MODEL_DEFAULT
         value: "claude-sonnet-5.5"
+      # Tools the API server channel (the Pebble ring bridge) may use. The
+      # default hermes-api-server set includes terminal/file-write/process
+      # tools, which must never be reachable from the ring. cronjob and
+      # delegation are left out too: scheduled jobs and subagents run with
+      # fuller toolsets, a back door to the terminal.
+      - name: API_SERVER_TOOLSETS
+        value: '["memory", "todo", "session_search", "clarify"]'
     volumeMounts:
       - name: data
         mountPath: /opt/data
