@@ -78,6 +78,47 @@ serviceAccount:
   name: hermes-agent
   automountServiceAccountToken: false   # no K8s API access (also the chart default)
 
+# Hermes reads its model from /opt/data/config.yaml (persisted; env vars like
+# OPENROUTER_BASE_URL/MODEL do not override it). Pin the `model:` block to
+# LiteLLM from git on every start; other settings stay editable in Hermes.
+initContainers:
+  - name: pin-model-config
+    image: "nousresearch/hermes-agent:v2026.9.24@sha256:2fd023efbb8d3d2b0ce1a73d028b07370cff34f567cfe0e999553e8c327ea283"
+    imagePullPolicy: IfNotPresent
+    command: ["/opt/hermes/.venv/bin/python", "-c"]
+    args:
+      - |
+        import os, yaml
+        p = "/opt/data/config.yaml"
+        if not os.path.exists(p):
+            print("no config.yaml yet; Hermes will create it - nothing to pin"); raise SystemExit
+        d = yaml.safe_load(open(p)) or {}
+        want = {"provider": os.environ["MODEL_PROVIDER"],
+                "base_url": os.environ["MODEL_BASE_URL"],
+                "default": os.environ["MODEL_DEFAULT"]}
+        if d.get("model") != want:
+            d["model"] = want
+            yaml.safe_dump(d, open(p, "w"), sort_keys=False)
+            print("pinned model:", want)
+        else:
+            print("model already pinned:", want)
+    env:
+      - name: MODEL_PROVIDER
+        value: "openrouter"   # generic OpenAI-compatible client; key = OPENROUTER_API_KEY
+      - name: MODEL_BASE_URL
+        value: "http://litellm.litellm.svc.cluster.local:4000/v1"
+      - name: MODEL_DEFAULT
+        value: "claude-sonnet-5.5"
+    volumeMounts:
+      - name: data
+        mountPath: /opt/data
+    securityContext:
+      runAsUser: 10000
+      runAsGroup: 10000
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+
 # Dashboard as a second container in the same pod (shares localhost + /opt/data).
 extraContainers:
   - name: dashboard
