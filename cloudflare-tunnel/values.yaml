@@ -3,7 +3,7 @@
 
 image:
   repository: cloudflare/cloudflared
-  tag: "2026.5.2"
+  tag: "2026.10.2"
   pullPolicy: IfNotPresent
 
 replicaCount: 2
