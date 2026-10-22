@@ -39,6 +39,11 @@ env:
   value: http://lens.lens.svc.cluster.local:4318/v1/traces
 - name: OTEL_SERVICE_NAME
   value: litellm
+# Use the pricing table bundled in the image. Otherwise LiteLLM fetches it from
+# raw.githubusercontent.com at startup -- a host the egress policy below
+# deliberately does not allow.
+- name: LITELLM_LOCAL_MODEL_COST_MAP
+  value: "True"
 
 podAnnotations:
   prometheus.io/scrape: "true"
@@ -127,6 +132,74 @@ networkPolicy:
       toPorts:
       - ports:
         - port: "4001"
+          protocol: TCP
+  # Egress is an allowlist. A model gateway talks to a short, known list of
+  # places; anything else is denied, so code that should not be running inside
+  # it -- a compromised dependency, say -- has nowhere to send data.
+  # Ports are the destination pods' own ports: Cilium matches egress after the
+  # Service translates, and here each Service port equals its container port.
+  egress:
+    denyAll: true
+    # The chart's plain DNS rule has no L7 inspection, and toFQDNs only works on
+    # names Cilium has seen resolved -- so DNS is supplied here with a dns rule.
+    # That also makes every lookup this pod performs visible in Hubble.
+    allowDNS: false
+    customRules:
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: kube-system
+          k8s:k8s-app: kube-dns
+      toPorts:
+      - ports:
+        - port: "53"
+          protocol: UDP
+        - port: "53"
+          protocol: TCP
+        rules:
+          dns:
+          - matchPattern: "*"
+    # Virtual keys and spend (DATABASE_URL).
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: litellm
+          app.kubernetes.io/name: postgres
+      toPorts:
+      - ports:
+        - port: "5432"
+          protocol: TCP
+    # Local models.
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: ollama
+          app.kubernetes.io/name: ollama
+      toPorts:
+      - ports:
+        - port: "11434"
+          protocol: TCP
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: llama
+          app.kubernetes.io/name: llama-cpp
+      toPorts:
+      - ports:
+        - port: "8080"
+          protocol: TCP
+    # OTEL traces.
+    - toEndpoints:
+      - matchLabels:
+          k8s:io.kubernetes.pod.namespace: lens
+          app.kubernetes.io/name: lens
+      toPorts:
+      - ports:
+        - port: "4318"
+          protocol: TCP
+    # Hosted models: exactly the two upstreams the model list routes to.
+    - toFQDNs:
+      - matchName: api.anthropic.com  # hygiene:allow (public vendor endpoint)
+      - matchName: inference-api.nousresearch.com  # hygiene:allow (public vendor endpoint)
+      toPorts:
+      - ports:
+        - port: "443"
           protocol: TCP
 
 configMap:
