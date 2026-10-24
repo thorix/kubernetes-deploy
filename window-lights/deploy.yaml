@@ -1,0 +1,6 @@
+namespace: window-lights
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../window-lights/values.yaml
