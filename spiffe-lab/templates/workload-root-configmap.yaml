@@ -1,0 +1,24 @@
+{{- /*
+Trust anchor for the gateway's client-certificate validation, in the
+Gateway's namespace under the key Envoy Gateway reads (ca.crt).
+
+A static copy of the workload trust domain's long-lived root. The SPIRE
+bundle ConfigMap is not used: it lives in the SPIRE namespace under another
+key. Every SVID chains to this root through the server's intermediate CA, so
+the copy only needs updating if the root itself is replaced.
+*/ -}}
+{{- $gw := .Values.gateway }}
+{{- $pem := required "gateway.clientCA.pem is required" $gw.clientCA.pem }}
+{{- if not (contains "-----BEGIN CERTIFICATE-----" $pem) }}
+{{- fail "gateway.clientCA.pem must be a PEM certificate" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $gw.clientCA.configMapName }}
+  namespace: {{ $gw.namespace }}
+  labels:
+    {{- include "spiffe-lab.labels" (dict "root" . "name" "gateway") | nindent 4 }}
+data:
+  ca.crt: |
+    {{- $pem | trim | nindent 4 }}

@@ -1,0 +1,49 @@
+{{- /*
+Client-certificate validation on the gateway's two mTLS listeners. Both
+require a certificate that chains to the workload trust domain's root
+(gateway.clientCA) and reject the handshake otherwise.
+
+  gw-mtls          also requires a URI SAN equal to the client's SPIFFE ID, so
+                   any other workload's valid certificate fails the handshake.
+  gw-mtls-control  CA check only. A caller that completes this handshake holds
+                   a valid, current certificate, which proves a handshake
+                   failure on the mtls listener is the SAN check.
+*/ -}}
+{{- $gw := .Values.gateway }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" . "name" "gateway") }}
+{{- $clientID := include "spiffe-lab.clientID" . }}
+{{- $policies := list
+  (dict "name" "gw-mtls" "listener" $gw.listeners.mtls "uris" (list $clientID))
+  (dict "name" "gw-mtls-control" "listener" $gw.listeners.mtlsControl "uris" (list))
+}}
+{{- range $p := $policies }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ $gw.namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gw.name }}
+      sectionName: {{ $p.listener }}
+  tls:
+    clientValidation:
+      mode: RequireAndVerify
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: {{ $gw.clientCA.configMapName }}
+      {{- with $p.uris }}
+      subjectAltNames:
+        uris:
+          {{- range . }}
+          - type: Exact
+            value: {{ . | quote }}
+          {{- end }}
+      {{- end }}
+{{- end }}

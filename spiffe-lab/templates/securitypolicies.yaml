@@ -1,0 +1,60 @@
+{{- /*
+JWT policies for the gateway JWT path, one per rule of the gw-jwt route
+(targetRefs sectionName = HTTPRoute rule name).
+
+Both validate a Bearer JWT-SVID against the workload trust domain's JWKS:
+issuer, audience (caller.gatewayAudience) and signature. The verified sub
+claim is copied into gateway.jwt.subHeader for the upstream.
+
+  gw-jwt-hello    adds authorization: deny by default, allow only when sub is
+                  the client's SPIFFE ID. A valid token for any other ID gets
+                  the RBAC 403.
+  gw-jwt-control  authentication only. A caller whose token is valid reaches
+                  the upstream, which proves a 403 on /hello is an
+                  authorization decision.
+*/ -}}
+{{- $gw := .Values.gateway }}
+{{- $ns := .Values.server.namespace }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" . "name" "gateway") }}
+{{- $provider := dict
+  "name" $gw.jwt.provider
+  "issuer" (required "gateway.jwt.issuer is required" $gw.jwt.issuer)
+  "audiences" (list .Values.caller.gatewayAudience)
+  "remoteJWKS" (dict "uri" (required "gateway.jwt.jwksURI is required" $gw.jwt.jwksURI) "cacheDuration" $gw.jwt.cacheDuration)
+  "claimToHeaders" (list (dict "claim" "sub" "header" $gw.jwt.subHeader))
+}}
+{{- $clientID := include "spiffe-lab.clientID" . }}
+{{- range $rule := list "hello" "control" }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: gw-jwt-{{ $rule }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-jwt
+      sectionName: {{ $rule }}
+  jwt:
+    providers:
+      {{- toYaml (list $provider) | nindent 6 }}
+  {{- if eq $rule "hello" }}
+  authorization:
+    defaultAction: Deny
+    rules:
+      - name: allow-client
+        action: Allow
+        principal:
+          jwt:
+            provider: {{ $gw.jwt.provider }}
+            claims:
+              - name: sub
+                valueType: String
+                values:
+                  - {{ $clientID | quote }}
+  {{- end }}
+{{- end }}

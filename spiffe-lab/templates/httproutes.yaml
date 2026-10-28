@@ -1,0 +1,54 @@
+{{- /*
+Gateway routes to the server's plain-HTTP upstream, one HTTPRoute per gateway
+path. Each attaches to one listener of the Gateway (sectionName) and lives in
+the server namespace, which the listeners admit by its trust-domain label.
+
+  gw-jwt           JWT listener. Two named rules, so each SecurityPolicy can
+                   target one rule: "hello" (authorized) and "control"
+                   (authenticated only).
+  gw-mtls          mTLS listener (SAN-restricted client certificate).
+  gw-mtls-control  mTLS control listener (any certificate from the CA).
+
+The callers request /hello on the protected listener and /control or /hello
+on the control one, so only those paths are routed.
+*/ -}}
+{{- $gw := .Values.gateway }}
+{{- $host := required "gateway.hostname is required" $gw.hostname }}
+{{- $ns := .Values.server.namespace }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" . "name" "gateway") }}
+{{- $backend := dict "name" (printf "%s-upstream" .Values.server.serviceAccount) "port" 8080 }}
+{{- $routes := list
+  (dict "name" "gw-jwt" "listener" $gw.listeners.jwt "rules" (list (dict "name" "hello" "path" "/hello") (dict "name" "control" "path" "/control")))
+  (dict "name" "gw-mtls" "listener" $gw.listeners.mtls "rules" (list (dict "name" "hello" "path" "/hello")))
+  (dict "name" "gw-mtls-control" "listener" $gw.listeners.mtlsControl "rules" (list (dict "name" "hello" "path" "/hello")))
+}}
+{{- range $r := $routes }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $r.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gw.name }}
+      namespace: {{ $gw.namespace }}
+      sectionName: {{ $r.listener }}
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    {{- range $rule := $r.rules }}
+    - name: {{ $rule.name }}
+      matches:
+        - path:
+            type: Exact
+            value: {{ $rule.path }}
+      backendRefs:
+        - name: {{ $backend.name }}
+          port: {{ $backend.port }}
+    {{- end }}
+{{- end }}
