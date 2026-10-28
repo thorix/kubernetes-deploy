@@ -1,0 +1,2 @@
+# spire-crds: SPIRE CRDs only (ClusterSPIFFEID, ClusterFederatedTrustDomain, ClusterStaticEntry).
+# No overrides needed; chart defaults are used.
