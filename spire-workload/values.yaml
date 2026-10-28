@@ -2,8 +2,13 @@
 # defaults live in spire-lab-domain/values.yaml. Every value here must differ
 # from spire-infra/values.yaml: both releases run on every node.
 #
-# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
-# and bundleEndpoint.loadBalancerIP.
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer,
+# bundleEndpoint.loadBalancerIP, federation.peer.{bundleEndpointURL,
+# trustDomainBundle} and oidc.httpRoute.{hostname,parentRef.sectionName}.
+
+federation:
+  peer:
+    trustDomain: infra.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
 
 vault:
   secrets:
