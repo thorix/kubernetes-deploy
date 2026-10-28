@@ -71,10 +71,12 @@ urls:
   gatewayMTLS: ""  # https://<gateway host>:8443
   gatewayMTLSControl: ""  # https://<gateway host>:9443
 
-# Envoy proxy pods allowed to reach the server's upstream port.
+# Envoy proxy pods allowed to reach the server's upstream port: those owned by
+# the Gateway <namespace>/<name>, running in proxyNamespace.
 gateway:
-  namespace: envoy-gateway-system
   name: infra-gw
+  namespace: envoy-gateway-system  # The Gateway object's namespace
+  proxyNamespace: envoy-gateway-system  # Where its Envoy proxy pods run
 
 # Metrics scraper allowed to reach :9090.
 scraper:

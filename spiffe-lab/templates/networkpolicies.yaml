@@ -6,9 +6,12 @@ local host for kubelet probes.
 
 Server, in addition:
   - 8443/9443 (direct listeners) from outside the cluster and from the client
-    and intruder. LoadBalancer traffic forwarded from another node can arrive
-    with a node identity, so the cluster entity is allowed alongside world.
-  - 8080 (plain-HTTP upstream) only from the gateway's Envoy proxy pods.
+    and intruder pods. LoadBalancer traffic from outside the cluster arrives as
+    world, or, when the node that received it SNATs and forwards it to a
+    backend elsewhere, as host or remote-node. Other cluster pods are not
+    admitted.
+  - 8080 (plain-HTTP upstream) only from the Envoy proxy pods of one Gateway,
+    matched by the Gateway's name and namespace.
 */}}
 {{- $scraper := dict "k8s:io.kubernetes.pod.namespace" .Values.scraper.namespace }}
 {{- range $k, $v := .Values.scraper.matchLabels }}
@@ -45,7 +48,8 @@ spec:
     {{- if eq $w.namespace $.Values.server.namespace }}
     - fromEntities:
         - world
-        - cluster
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: "8443"
@@ -65,8 +69,9 @@ spec:
               protocol: TCP
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: {{ $.Values.gateway.namespace }}
+            k8s:io.kubernetes.pod.namespace: {{ $.Values.gateway.proxyNamespace }}
             k8s:gateway.envoyproxy.io/owning-gateway-name: {{ $.Values.gateway.name }}
+            k8s:gateway.envoyproxy.io/owning-gateway-namespace: {{ $.Values.gateway.namespace }}
       toPorts:
         - ports:
             - port: "8080"
