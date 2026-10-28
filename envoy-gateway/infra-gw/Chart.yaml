@@ -1,0 +1,5 @@
+apiVersion: v2
+name: infra-gw
+description: Envoy Gateway GatewayClass, EnvoyProxy, Gateway and certificate for infra-gw
+type: application
+version: 0.1.0

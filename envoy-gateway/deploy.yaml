@@ -1,0 +1,15 @@
+# Envoy Gateway controller plus one Gateway (infra-gw), running next to the
+# Cilium Gateway API implementation. Gateway API CRDs and Envoy Gateway CRDs
+# are owned by other apps and are never rendered here.
+namespace: envoy-gateway-system
+syncWave: "0"
+
+helm:
+- chart: gateway-helm
+  repoURL: docker.io/envoyproxy
+  targetRevision: "v1.9.3"
+  valuesFiles:
+  - envoy-gateway/values.yaml
+- path: envoy-gateway/infra-gw
+  valuesFiles:
+  - ../values.infra-gw.yaml

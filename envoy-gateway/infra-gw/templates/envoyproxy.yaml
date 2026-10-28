@@ -1,0 +1,28 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: infra-gw-proxy
+  namespace: {{ .Release.Namespace }}
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        # Cluster: required for L2-announced LoadBalancer IPs.
+        externalTrafficPolicy: Cluster
+        annotations:
+          lbipam.cilium.io/ips: {{ required "loadBalancerIP is required" .Values.loadBalancerIP | quote }}
+  telemetry:
+    accessLog:
+      settings:
+      - format:
+          type: Text
+          text: >-
+            [%START_TIME%] "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%"
+            %RESPONSE_CODE% %RESPONSE_FLAGS% tls_fail="%DOWNSTREAM_TRANSPORT_FAILURE_REASON%"
+            peer_uri_san="%DOWNSTREAM_PEER_URI_SAN%" upstream=%UPSTREAM_HOST%
+        sinks:
+        - type: File
+          file:
+            path: /dev/stdout

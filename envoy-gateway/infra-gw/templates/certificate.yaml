@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: infra-gw-tls
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: infra-gw-tls
+  dnsNames:
+  - {{ required "hostname is required" .Values.hostname | quote }}
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

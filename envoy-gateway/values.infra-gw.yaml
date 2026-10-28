@@ -1,0 +1,3 @@
+# Generic placeholders; the cluster overlay supplies real values.
+hostname: ""
+loadBalancerIP: ""
