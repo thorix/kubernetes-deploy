@@ -1,0 +1,7 @@
+# Envoy Gateway CRDs only. Gateway API CRDs are owned by another app and must
+# never be rendered here (see README.md "Render guard").
+crds:
+  gatewayAPI:
+    enabled: false
+  envoyGateway:
+    enabled: true
