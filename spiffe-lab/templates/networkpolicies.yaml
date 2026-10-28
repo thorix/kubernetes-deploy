@@ -1,0 +1,75 @@
+{{- /*
+Ingress policies for the lab pods. Egress is not restricted.
+
+Every pod: :9090 (metrics, health, status) from the metrics scraper, plus the
+local host for kubelet probes.
+
+Server, in addition:
+  - 8443/9443 (direct listeners) from outside the cluster and from the client
+    and intruder. LoadBalancer traffic forwarded from another node can arrive
+    with a node identity, so the cluster entity is allowed alongside world.
+  - 8080 (plain-HTTP upstream) only from the gateway's Envoy proxy pods.
+*/}}
+{{- $scraper := dict "k8s:io.kubernetes.pod.namespace" .Values.scraper.namespace }}
+{{- range $k, $v := .Values.scraper.matchLabels }}
+{{- $_ := set $scraper (printf "k8s:%s" $k) $v }}
+{{- end }}
+{{- range $w := list .Values.server .Values.client .Values.intruder }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $w.serviceAccount }}
+  namespace: {{ $w.namespace }}
+  labels:
+    {{- include "spiffe-lab.labels" (dict "root" $ "name" $w.serviceAccount) | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $w.serviceAccount }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml $scraper | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+    {{- if eq $w.namespace $.Values.server.namespace }}
+    - fromEntities:
+        - world
+        - cluster
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $.Values.client.namespace }}
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $.Values.intruder.namespace }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $.Values.gateway.namespace }}
+            k8s:gateway.envoyproxy.io/owning-gateway-name: {{ $.Values.gateway.name }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
+{{- end }}

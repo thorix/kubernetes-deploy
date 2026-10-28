@@ -1,0 +1,18 @@
+{{- /*
+The three lab namespaces. The spiffe.lab/td label is the opt-in that the
+ClusterSPIFFEIDs select on; only lab apps run here, so Pod Security is
+restricted (enforce, audit and warn).
+*/}}
+{{- range $ns := list (dict "name" .Values.server.namespace "td" "infra") (dict "name" .Values.client.namespace "td" "workload") (dict "name" .Values.intruder.namespace "td" "workload") }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns.name }}
+  labels:
+    {{- include "spiffe-lab.labels" (dict "root" $ "name" $ns.name) | nindent 4 }}
+    spiffe.lab/td: {{ $ns.td }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+{{- end }}

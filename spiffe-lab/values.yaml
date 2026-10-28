@@ -1,0 +1,90 @@
+# spiffe-lab: one binary in three roles.
+#   server   (infra trust domain)    direct mTLS :8443, direct JWT :9443,
+#                                    upstream echo :8080 (behind the gateway)
+#   client   (workload trust domain) allow-listed caller, expects allow
+#   intruder (workload trust domain) not allow-listed, expects deny
+# All three serve /metrics and /healthz on :9090; client and intruder also
+# serve /status there.
+#
+# SPIFFE IDs follow spiffe://<td>/ns/<namespace>/sa/<serviceaccount> and are
+# built in the templates from the values below.
+#
+# Env overlay sets: image.repository, image.tag, server.service.loadBalancerIP,
+# server.service.hostname and the urls.* block.
+
+image:
+  repository: harbor.lan/library/spiffe-lab
+  tag: ""  # Required: <git-sha>@sha256:<digest>, set in the env overlay
+  pullPolicy: IfNotPresent
+
+# Trust domain names. These are SPIFFE trust domains, not DNS names.
+trustDomains:
+  infra: infra.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+  workload: workload.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+
+# Per trust domain: the controller-manager class (spire-<d> release) that owns
+# the ClusterSPIFFEID, and the CSI driver that serves that domain's agent socket.
+spire:
+  infra:
+    className: spire-infra
+    csiDriver: infra.csi.spiffe.io
+  workload:
+    className: spire-workload
+    csiDriver: workload.csi.spiffe.io
+
+# Upper bounds for SVIDs minted from the lab ClusterSPIFFEIDs.
+svid:
+  ttl: 5m
+  jwtTtl: 5m
+
+# Where the CSI volume is mounted, and the agent socket inside it.
+workloadAPI:
+  mountPath: /spiffe-workload-api
+  socket: unix:///spiffe-workload-api/spire-agent.sock
+
+# Namespace and ServiceAccount names. Each one is also part of a SPIFFE ID.
+server:
+  namespace: lab-server
+  serviceAccount: lab-server
+  service:
+    # Direct listeners, exposed on a LoadBalancer IP.
+    loadBalancerIP: ""  # Env overlay (lbipam.cilium.io/ips); omitted when empty
+    hostname: ""  # Env overlay (external-dns hostname); omitted when empty
+client:
+  namespace: lab-client
+  serviceAccount: lab-client
+intruder:
+  namespace: lab-intruder
+  serviceAccount: lab-intruder
+
+# Client and intruder settings (the same for both).
+caller:
+  interval: 30s
+  gatewayAudience: infra-gw
+
+# URLs the client and intruder call. The direct ones are required. A gateway
+# URL left empty makes the binary skip that path.
+urls:
+  directMTLS: ""  # https://<server LB host>:8443
+  directJWT: ""  # https://<server LB host>:9443
+  gatewayJWT: ""  # https://<gateway host>
+  gatewayMTLS: ""  # https://<gateway host>:8443
+  gatewayMTLSControl: ""  # https://<gateway host>:9443
+
+# Envoy proxy pods allowed to reach the server's upstream port.
+gateway:
+  namespace: envoy-gateway-system
+  name: infra-gw
+
+# Metrics scraper allowed to reach :9090.
+scraper:
+  namespace: victoriametrics
+  matchLabels:
+    app.kubernetes.io/name: victoria-metrics-single
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi

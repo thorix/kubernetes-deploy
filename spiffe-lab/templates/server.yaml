@@ -1,0 +1,128 @@
+{{- $ns := .Values.server.namespace }}
+{{- $name := .Values.server.serviceAccount }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" . "name" $name) }}
+# The server's identity comes from its ServiceAccount (ID template), so the SA
+# name is part of the allow-list contract. It needs no API token: the agent's
+# workload attestor reads pod details from the kubelet.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- $labels | nindent 8 }}
+      annotations:
+        {{- include "spiffe-lab.podAnnotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "spiffe-lab.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: server
+          image: {{ include "spiffe-lab.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [server]
+          env:
+            # Only the client is allow-listed; the intruder must be denied.
+            - name: ALLOWED_IDS
+              value: {{ include "spiffe-lab.clientID" . | quote }}
+            # Direct-JWT audience.
+            - name: SERVER_ID
+              value: {{ include "spiffe-lab.serverID" . | quote }}
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: {{ .Values.workloadAPI.socket | quote }}
+          ports:
+            - name: direct-mtls
+              containerPort: 8443
+              protocol: TCP
+            - name: direct-jwt
+              containerPort: 9443
+              protocol: TCP
+            - name: upstream
+              containerPort: 8080
+              protocol: TCP
+            - name: ops
+              containerPort: 9090
+              protocol: TCP
+          {{- include "spiffe-lab.probes" . | nindent 10 }}
+          securityContext:
+            {{- include "spiffe-lab.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "spiffe-lab.workloadAPIMount" . | nindent 12 }}
+      volumes:
+        {{- include "spiffe-lab.workloadAPIVolume" (dict "driver" .Values.spire.infra.csiDriver) | nindent 8 }}
+---
+# Direct listeners on a LoadBalancer IP; clients call this address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+  {{- if or .Values.server.service.loadBalancerIP .Values.server.service.hostname }}
+  annotations:
+    {{- with .Values.server.service.loadBalancerIP }}
+    lbipam.cilium.io/ips: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.server.service.hostname }}
+    external-dns.alpha.kubernetes.io/hostname: {{ . | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: direct-mtls
+      port: 8443
+      targetPort: direct-mtls
+      protocol: TCP
+    - name: direct-jwt
+      port: 9443
+      targetPort: direct-jwt
+      protocol: TCP
+---
+# Plain-HTTP upstream for the gateway routes. In-cluster only; the network
+# policy limits it to the gateway's proxy pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-upstream
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: upstream
+      protocol: TCP

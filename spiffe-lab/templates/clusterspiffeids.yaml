@@ -1,0 +1,31 @@
+{{- /*
+One ClusterSPIFFEID per trust domain, each owned by that domain's
+controller-manager. The controller-managers filter by class, and with
+filterByClassName they only watch objects carrying the class-name label, so
+both the label and spec.className are set.
+
+The ID template is the lab's spiffe://<td>/ns/<namespace>/sa/<serviceaccount>;
+.TrustDomain is filled in by the owning controller-manager.
+*/}}
+{{- $idTemplate := "spiffe://{{ .TrustDomain }}/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}" }}
+{{- range $d := list (dict "name" "lab-infra" "td" "infra" "peer" "workload") (dict "name" "lab-workload" "td" "workload" "peer" "infra") }}
+{{- $spire := index $.Values.spire $d.td }}
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: {{ $d.name }}
+  labels:
+    {{- include "spiffe-lab.labels" (dict "root" $ "name" $d.name) | nindent 4 }}
+    spire.spiffe.io/class-name: {{ $spire.className }}
+spec:
+  className: {{ $spire.className }}
+  spiffeIDTemplate: {{ $idTemplate | quote }}
+  namespaceSelector:
+    matchLabels:
+      spiffe.lab/td: {{ $d.td }}
+  ttl: {{ $.Values.svid.ttl }}
+  jwtTtl: {{ $.Values.svid.jwtTtl }}
+  federatesWith:
+    - {{ index $.Values.trustDomains $d.peer }}
+{{- end }}
