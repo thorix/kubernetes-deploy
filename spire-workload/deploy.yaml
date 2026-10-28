@@ -1,0 +1,10 @@
+# spire-workload deployment (wrapper chart around the upstream spire chart).
+# The namespace is the SPIRE *server* namespace: the Vault templates render into
+# .Release.Namespace, which is where the server reads its upstream CA Secret.
+# The chart creates and labels its own system and server namespaces.
+
+namespace: spire-workload-server
+
+helm:
+- valuesFiles:
+  - values.yaml

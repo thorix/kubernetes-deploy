@@ -1,0 +1,11 @@
+apiVersion: v2
+name: spire-infra
+description: SPIRE release for the infra trust domain (server, agents, CSI driver, OIDC discovery provider)
+type: application
+version: 0.1.0
+appVersion: "1.15.5"
+
+dependencies:
+  - name: spire
+    version: "0.30.4"
+    repository: https://spiffe.github.io/helm-charts-hardened/

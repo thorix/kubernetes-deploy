@@ -1,0 +1,32 @@
+{{- if .Values.vault.enabled }}
+---
+apiVersion: redhatcop.redhat.io/v1alpha1
+kind: Policy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spire-wrapper.labels" . | nindent 4 }}
+spec:
+  # Vault connection settings
+  connection:
+    address: {{ .Values.vault.address }}
+    {{- if .Values.vault.skipTLSVerify }}
+    tLSConfig:
+      skipVerify: true
+    {{- end }}
+
+  # How vault-config-operator authenticates to Vault
+  authentication:
+    path: {{ .Values.vault.kubernetes.mountPath }}
+    role: vault-config-operator
+
+  # Policy name in Vault
+  name: {{ .Release.Name }}
+
+  # HCL policy definition: read-only access to this trust domain's upstream CA
+  policy: |
+    path "{{ .Values.vault.mount }}/data/{{ .Values.vault.secrets.upstreamCA }}" {
+      capabilities = ["read"]
+    }
+{{- end }}
