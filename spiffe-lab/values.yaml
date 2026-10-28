@@ -118,3 +118,9 @@ resources:
     memory: 32Mi
   limits:
     memory: 128Mi
+
+# Grafana dashboard ConfigMap (templates/grafana-dashboard.yaml). The Grafana
+# sidecar watches only Grafana's own namespace.
+dashboard:
+  namespace: victoriametrics
+  folder: SPIFFE Lab

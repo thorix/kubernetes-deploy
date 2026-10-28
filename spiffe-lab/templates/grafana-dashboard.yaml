@@ -1,0 +1,18 @@
+{{- /*
+Grafana dashboard for the lab, picked up by the Grafana sidecar (label
+grafana_dashboard=1). The sidecar watches only its own namespace, so the
+ConfigMap is rendered there. The JSON holds no environment-specific values.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spiffe-lab-dashboard
+  namespace: {{ .Values.dashboard.namespace }}
+  labels:
+    {{- include "spiffe-lab.labels" (dict "root" $ "name" "spiffe-lab-dashboard") | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: {{ .Values.dashboard.folder | quote }}
+data:
+  spiffe-lab.json: |-
+    {{- .Files.Get "dashboards/spiffe-lab.json" | nindent 4 }}
