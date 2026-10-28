@@ -1,0 +1,8 @@
+namespace: spire-crds
+
+helm:
+- chart: spire-crds
+  repoURL: https://spiffe.github.io/helm-charts-hardened/
+  targetRevision: "0.6.1"
+  valuesFiles:
+  - spire-crds/values.yaml
