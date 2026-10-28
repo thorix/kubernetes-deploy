@@ -11,7 +11,8 @@
 #   spire.global.spire: trustDomain, clusterName, bundleConfigMap,
 #     caSubject.commonName, namespaces.{system,server}.name
 #   spire.spire-server: upstreamAuthority.disk.secret.name, controllerManager.className
-#   spire.spire-agent: socketPath, healthChecks.port, telemetry.prometheus.port
+#   spire.spire-agent: socketPath, healthChecks.port, telemetry.prometheus.port,
+#     podAnnotations (prometheus.io/port must equal telemetry.prometheus.port)
 #   spire.spiffe-csi-driver: pluginName, agentSocketPath, healthChecks.port
 #   spire.spiffe-oidc-discovery-provider: csiDriverName
 #   vault.secrets.upstreamCA, vault.kubernetes.role
@@ -93,6 +94,12 @@ spire:
       enabled: false
 
   spire-server:
+    # Scraped by the cluster's pod-annotation job. The server's metrics port is
+    # fixed (9988) and pod-local, so it is shared by both releases.
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9988"
+      prometheus.io/path: /metrics
     # Workload SVIDs are short so rotation is visible. Agent SVIDs are not:
     # without agentTTL they would inherit 5m and confound server-outage tests.
     defaultX509SvidTTL: 5m

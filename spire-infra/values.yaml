@@ -45,6 +45,11 @@ spire:
     telemetry:
       prometheus:
         port: 9988
+    # Agents run on the host network, so the scrape port is per release.
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9988"
+      prometheus.io/path: /metrics
 
   spiffe-csi-driver:
     pluginName: infra.csi.spiffe.io
