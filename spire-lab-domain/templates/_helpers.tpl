@@ -16,3 +16,10 @@ can never disagree.
 {{- define "spire-wrapper.upstreamCASecret" -}}
 {{- index .Values.spire "spire-server" "upstreamAuthority" "disk" "secret" "name" -}}
 {{- end }}
+
+{{/*
+ServiceAccount VSO authenticates to Vault as (created by vault-serviceaccount.yaml).
+*/}}
+{{- define "spire-wrapper.vsoServiceAccount" -}}
+{{- printf "%s-vso" .Release.Name -}}
+{{- end }}

@@ -25,11 +25,11 @@ spec:
   path: {{ .Values.vault.kubernetes.mountPath }}
 
   # Role name in Vault
-  name: {{ .Values.vault.kubernetes.role }}
+  name: {{ required "vault.kubernetes.role is required" .Values.vault.kubernetes.role }}
 
   # Bind only the VSO auth service account in the SPIRE server namespace
   targetServiceAccounts:
-    - {{ .Values.vault.kubernetes.serviceAccount }}
+    - {{ include "spire-wrapper.vsoServiceAccount" . }}
   targetNamespaces:
     targetNamespaces:
       - {{ .Release.Namespace }}

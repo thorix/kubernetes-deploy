@@ -26,7 +26,7 @@ spec:
 
   # HCL policy definition: read-only access to this trust domain's upstream CA
   policy: |
-    path "{{ .Values.vault.mount }}/data/{{ .Values.vault.secrets.upstreamCA }}" {
+    path "{{ .Values.vault.mount }}/data/{{ required "vault.secrets.upstreamCA is required" .Values.vault.secrets.upstreamCA }}" {
       capabilities = ["read"]
     }
 {{- end }}

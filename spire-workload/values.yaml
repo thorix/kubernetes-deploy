@@ -1,97 +1,37 @@
-# spire-workload: one of two SPIRE releases co-located on every node (the other is
-# spire-infra). Layout follows the upstream examples/federation values of the
-# spire chart: every per-release name, port, socket path and class differs.
+# spire-workload: per-release settings for the shared spire-lab-domain chart. Shared
+# defaults live in spire-lab-domain/values.yaml. Every value here must differ
+# from spire-infra/values.yaml: both releases run on every node.
 #
-# Per-release separations (keep in step with spire-infra/values.yaml):
-#   namespaces          spire-workload-system / spire-workload-server
-#   controller class    spire-workload (filterByClassName: true)
-#   CSI driver          workload.csi.spiffe.io
-#   agent socket dir    /run/spire/agent-sockets-workload
-#   agent hostPorts     health 9983, metrics 9990
-#   CSI health port     9811
-#   bundle ConfigMap    spire-workload-bundle
-#
-# Env overlay sets: global.spire.clusterName, global.spire.jwtIssuer and
-# bundleEndpoint.loadBalancerIP.
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
+# and bundleEndpoint.loadBalancerIP.
 
-# Federation bundle endpoint exposed on a LoadBalancer IP (wrapper template).
-bundleEndpoint:
-  enabled: true
-  port: 8443
-  loadBalancerIP: ""  # Set in the env overlay (lbipam.cilium.io/ips)
-
-# Vault integration: the upstream CA reaches the cluster through VSO as the
-# Secret named by spire.spire-server.upstreamAuthority.disk.secret.name.
 vault:
-  enabled: true
-  address: "http://vault.vault.svc.cluster.local:8200"
-  skipTLSVerify: true
-  mount: kv
-  refreshAfter: 1h
   secrets:
     upstreamCA: spire-workload/ca  # fields tls.crt, tls.key
   kubernetes:
-    mountPath: kubernetes
     role: spire-workload
-    serviceAccount: default
-    audience: vault
-    tokenTTL: 86400
 
-# Upstream spire chart
 spire:
   global:
     spire:
       trustDomain: workload.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
       clusterName: workload  # Overridden in the env overlay
       bundleConfigMap: spire-workload-bundle
-      # Subject of the SPIRE intermediate CA (signed by the upstream root).
-      # Required by the chart's strict mode. XX is the ISO user-assigned code.
       caSubject:
-        country: XX
-        organization: SPIFFE lab
         commonName: workload.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
-      recommendations:
-        enabled: true  # PSS privileged on the system namespace, Prometheus exporters
       namespaces:
-        create: true
         system:
           name: spire-workload-system
         server:
           name: spire-workload-server
-    # Argo CD maps pre-upgrade hooks to PreSync, which breaks the first sync.
-    installAndUpgradeHooks:
-      enabled: false
-    deleteHooks:
-      enabled: false
 
   spire-server:
-    defaultX509SvidTTL: 5m
-    defaultJwtSvidTTL: 5m
-    federation:
-      enabled: true
     upstreamAuthority:
       disk:
-        enabled: true
         secret:
-          create: false
           name: spire-workload-upstream-ca
     controllerManager:
       className: spire-workload
-      filterByClassName: true
-      identities:
-        clusterSPIFFEIDs:
-          # The default identity matches every pod in every namespace. Workloads
-          # opt in through ClusterSPIFFEIDs defined with the lab apps instead.
-          default:
-            enabled: false
-          test-keys:
-            enabled: false
-          # Kept: the OIDC discovery provider fetches bundles over the Workload
-          # API and needs its own SVID. It selects only this release's pods.
-          oidc-discovery-provider:
-            enabled: true
-      validatingWebhookConfiguration:
-        failurePolicy: Ignore
 
   spire-agent:
     socketPath: /run/spire/agent-sockets-workload/spire-agent.sock
@@ -108,8 +48,4 @@ spire:
       port: 9811
 
   spiffe-oidc-discovery-provider:
-    enabled: true
     csiDriverName: workload.csi.spiffe.io
-    tls:
-      spire:
-        enabled: false

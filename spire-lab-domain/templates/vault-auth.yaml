@@ -12,8 +12,8 @@ spec:
   method: kubernetes
   mount: {{ .Values.vault.kubernetes.mountPath }}
   kubernetes:
-    role: {{ .Values.vault.kubernetes.role }}
-    serviceAccount: {{ .Values.vault.kubernetes.serviceAccount }}
+    role: {{ required "vault.kubernetes.role is required" .Values.vault.kubernetes.role }}
+    serviceAccount: {{ include "spire-wrapper.vsoServiceAccount" . }}
     audiences:
       - {{ .Values.vault.kubernetes.audience }}
 {{- end }}
