@@ -96,7 +96,8 @@ gateway:
     issuer: ""  # Required (env overlay): the domain's jwtIssuer
     jwksURI: ""  # Required (env overlay): <issuer>/keys
     cacheDuration: 60s
-    # The verified sub claim is forwarded to the upstream in this header.
+    # The verified sub claim is forwarded to the upstream in this header. Every
+    # listener strips a client-supplied copy first (ClientTrafficPolicies).
     subHeader: X-Spiffe-Id
   # Path 4: trust anchor for client certificates, published as a ConfigMap with
   # key ca.crt (the format Envoy Gateway reads). A static copy of the workload
