@@ -1,0 +1,19 @@
+{{- if .Values.vault.enabled }}
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: {{ .Release.Name }}-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spire-wrapper.labels" . | nindent 4 }}
+spec:
+  vaultConnectionRef: {{ .Release.Name }}-connection
+  method: kubernetes
+  mount: {{ .Values.vault.kubernetes.mountPath }}
+  kubernetes:
+    role: {{ required "vault.kubernetes.role is required" .Values.vault.kubernetes.role }}
+    serviceAccount: {{ include "spire-wrapper.vsoServiceAccount" . }}
+    audiences:
+      - {{ .Values.vault.kubernetes.audience }}
+{{- end }}

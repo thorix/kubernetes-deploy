@@ -1,0 +1,11 @@
+# spire-infra: the infra trust domain, deployed from the shared spire-lab-domain
+# chart. The namespace is the SPIRE *server* namespace: the wrapper's Vault
+# templates render into .Release.Namespace, where the server reads its upstream
+# CA Secret. The chart creates and labels its own system and server namespaces.
+
+namespace: spire-infra-server
+
+helm:
+- path: spire-lab-domain
+  valuesFiles:
+  - ../spire-infra/values.yaml

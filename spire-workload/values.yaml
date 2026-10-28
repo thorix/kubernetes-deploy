@@ -1,0 +1,51 @@
+# spire-workload: per-release settings for the shared spire-lab-domain chart. Shared
+# defaults live in spire-lab-domain/values.yaml. Every value here must differ
+# from spire-infra/values.yaml: both releases run on every node.
+#
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
+# and bundleEndpoint.loadBalancerIP.
+
+vault:
+  secrets:
+    upstreamCA: spire-workload/ca  # fields tls.crt, tls.key
+  kubernetes:
+    role: spire-workload
+
+spire:
+  global:
+    spire:
+      trustDomain: workload.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+      clusterName: workload  # Overridden in the env overlay
+      bundleConfigMap: spire-workload-bundle
+      caSubject:
+        commonName: workload.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+      namespaces:
+        system:
+          name: spire-workload-system
+        server:
+          name: spire-workload-server
+
+  spire-server:
+    upstreamAuthority:
+      disk:
+        secret:
+          name: spire-workload-upstream-ca
+    controllerManager:
+      className: spire-workload
+
+  spire-agent:
+    socketPath: /run/spire/agent-sockets-workload/spire-agent.sock
+    healthChecks:
+      port: 9983
+    telemetry:
+      prometheus:
+        port: 9990
+
+  spiffe-csi-driver:
+    pluginName: workload.csi.spiffe.io
+    agentSocketPath: /run/spire/agent-sockets-workload/spire-agent.sock
+    healthChecks:
+      port: 9811
+
+  spiffe-oidc-discovery-provider:
+    csiDriverName: workload.csi.spiffe.io

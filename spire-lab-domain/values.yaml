@@ -1,0 +1,99 @@
+# spire-lab-domain: shared defaults for one SPIRE trust domain. It has no
+# deploy.yaml; spire-infra/ and spire-workload/ each deploy it with a values
+# file holding only their per-release settings. Two releases share every node,
+# so every per-release name, port, socket path and class must differ (layout of
+# the spire chart's examples/federation). Those settings are deliberately left
+# unset here: trustDomain falls back to the chart's example.org, which the
+# chart's strict mode rejects, so a release without its own values fails to
+# render instead of colliding with the other one.
+#
+# Per-release settings (see spire-infra/values.yaml, spire-workload/values.yaml):
+#   spire.global.spire: trustDomain, clusterName, bundleConfigMap,
+#     caSubject.commonName, namespaces.{system,server}.name
+#   spire.spire-server: upstreamAuthority.disk.secret.name, controllerManager.className
+#   spire.spire-agent: socketPath, healthChecks.port, telemetry.prometheus.port
+#   spire.spiffe-csi-driver: pluginName, agentSocketPath, healthChecks.port
+#   spire.spiffe-oidc-discovery-provider: csiDriverName
+#   vault.secrets.upstreamCA, vault.kubernetes.role
+#
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
+# and bundleEndpoint.loadBalancerIP.
+
+# Federation bundle endpoint exposed on a LoadBalancer IP (wrapper template).
+bundleEndpoint:
+  enabled: true
+  port: 8443
+  loadBalancerIP: ""  # Set in the env overlay (lbipam.cilium.io/ips)
+
+# Vault integration: the upstream CA reaches the cluster through VSO as the
+# Secret named by spire.spire-server.upstreamAuthority.disk.secret.name. VSO
+# authenticates as a dedicated ServiceAccount, <release>-vso, created by this
+# chart in the server namespace, so no other pod there can read the CA key.
+vault:
+  enabled: true
+  address: "http://vault.vault.svc.cluster.local:8200"
+  skipTLSVerify: true
+  mount: kv
+  refreshAfter: 1h
+  secrets:
+    upstreamCA: ""  # Per release: <release>/ca (fields tls.crt, tls.key)
+  kubernetes:
+    mountPath: kubernetes
+    role: ""  # Per release
+    audience: vault
+    tokenTTL: 86400
+
+# Upstream spire chart
+spire:
+  global:
+    spire:
+      recommendations:
+        enabled: true  # PSS privileged on the system namespace, Prometheus exporters
+      namespaces:
+        create: true
+      # Subject of the SPIRE intermediate CA (signed by the upstream root).
+      # Required by the chart's strict mode. XX is the ISO user-assigned code.
+      caSubject:
+        country: XX
+        organization: SPIFFE lab
+    # Argo CD maps pre-upgrade hooks to PreSync, which breaks the first sync.
+    installAndUpgradeHooks:
+      enabled: false
+    deleteHooks:
+      enabled: false
+
+  spire-server:
+    # Workload SVIDs are short so rotation is visible. Agent SVIDs are not:
+    # without agentTTL they would inherit 5m and confound server-outage tests.
+    defaultX509SvidTTL: 5m
+    defaultJwtSvidTTL: 5m
+    agentTTL: 1h
+    federation:
+      enabled: true
+    upstreamAuthority:
+      disk:
+        enabled: true
+        secret:
+          create: false
+    controllerManager:
+      filterByClassName: true
+      identities:
+        clusterSPIFFEIDs:
+          # The default identity matches every pod in every namespace. Workloads
+          # opt in through ClusterSPIFFEIDs defined with the lab apps instead.
+          default:
+            enabled: false
+          test-keys:
+            enabled: false
+          # Kept: the OIDC discovery provider fetches bundles over the Workload
+          # API and needs its own SVID. It selects only this release's pods.
+          oidc-discovery-provider:
+            enabled: true
+      validatingWebhookConfiguration:
+        failurePolicy: Ignore
+
+  spiffe-oidc-discovery-provider:
+    enabled: true
+    tls:
+      spire:
+        enabled: false

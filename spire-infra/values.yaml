@@ -1,0 +1,51 @@
+# spire-infra: per-release settings for the shared spire-lab-domain chart. Shared
+# defaults live in spire-lab-domain/values.yaml. Every value here must differ
+# from spire-workload/values.yaml: both releases run on every node.
+#
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
+# and bundleEndpoint.loadBalancerIP.
+
+vault:
+  secrets:
+    upstreamCA: spire-infra/ca  # fields tls.crt, tls.key
+  kubernetes:
+    role: spire-infra
+
+spire:
+  global:
+    spire:
+      trustDomain: infra.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+      clusterName: infra  # Overridden in the env overlay
+      bundleConfigMap: spire-infra-bundle
+      caSubject:
+        commonName: infra.lab  # hygiene:allow (SPIFFE trust domain, not DNS)
+      namespaces:
+        system:
+          name: spire-infra-system
+        server:
+          name: spire-infra-server
+
+  spire-server:
+    upstreamAuthority:
+      disk:
+        secret:
+          name: spire-infra-upstream-ca
+    controllerManager:
+      className: spire-infra
+
+  spire-agent:
+    socketPath: /run/spire/agent-sockets-infra/spire-agent.sock
+    healthChecks:
+      port: 9982
+    telemetry:
+      prometheus:
+        port: 9988
+
+  spiffe-csi-driver:
+    pluginName: infra.csi.spiffe.io
+    agentSocketPath: /run/spire/agent-sockets-infra/spire-agent.sock
+    healthChecks:
+      port: 9809
+
+  spiffe-oidc-discovery-provider:
+    csiDriverName: infra.csi.spiffe.io
