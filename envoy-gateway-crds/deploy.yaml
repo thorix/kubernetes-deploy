@@ -1,0 +1,9 @@
+namespace: envoy-gateway-system
+syncWave: "-1"
+
+helm:
+- chart: gateway-crds-helm
+  repoURL: docker.io/envoyproxy
+  targetRevision: "v1.9.3"
+  valuesFiles:
+  - envoy-gateway-crds/values.yaml

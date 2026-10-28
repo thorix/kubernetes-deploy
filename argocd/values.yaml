@@ -70,6 +70,11 @@ argocd:
         type: helm
         url: ghcr.io/actions/actions-runner-controller-charts
         enableOCI: "true"
+      envoyproxy:
+        name: envoyproxy
+        type: helm
+        url: docker.io/envoyproxy
+        enableOCI: "true"
     # Additional accounts for API access
     cm:
       accounts.claude: apiKey
