@@ -1,0 +1,9 @@
+# spiffe-lab: the lab workloads for the two SPIRE trust domains (spire-infra,
+# spire-workload). The destination is the server namespace; the chart creates
+# and labels all three lab namespaces itself.
+
+namespace: lab-server
+
+helm:
+- valuesFiles:
+  - values.yaml

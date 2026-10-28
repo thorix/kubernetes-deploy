@@ -1,0 +1,92 @@
+{{- /*
+Client and intruder: the same Deployment in two namespaces. Only CALLER and
+EXPECT differ, so any difference in outcome comes from the server's allow list.
+*/}}
+{{- $directMTLS := required "urls.directMTLS is required" .Values.urls.directMTLS }}
+{{- $directJWT := required "urls.directJWT is required" .Values.urls.directJWT }}
+{{- range $c := list (dict "role" "client" "cfg" .Values.client "expect" "allow") (dict "role" "intruder" "cfg" .Values.intruder "expect" "deny") }}
+{{- $ns := $c.cfg.namespace }}
+{{- $name := $c.cfg.serviceAccount }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" $ "name" $name) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- $labels | nindent 8 }}
+      annotations:
+        {{- include "spiffe-lab.podAnnotations" $ | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "spiffe-lab.podSecurityContext" $ | nindent 8 }}
+      containers:
+        - name: {{ $c.role }}
+          image: {{ include "spiffe-lab.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args: [client]
+          env:
+            - name: CALLER
+              value: {{ $c.role }}
+            - name: EXPECT
+              value: {{ $c.expect }}
+            - name: SERVER_ID
+              value: {{ include "spiffe-lab.serverID" $ | quote }}
+            - name: DIRECT_MTLS_URL
+              value: {{ $directMTLS | quote }}
+            - name: DIRECT_JWT_URL
+              value: {{ $directJWT | quote }}
+            {{- with $.Values.urls.gatewayJWT }}
+            - name: GW_JWT_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $.Values.urls.gatewayMTLS }}
+            - name: GW_MTLS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $.Values.urls.gatewayMTLSControl }}
+            - name: GW_MTLS_CONTROL_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: GW_AUDIENCE
+              value: {{ $.Values.caller.gatewayAudience | quote }}
+            - name: INTERVAL
+              value: {{ $.Values.caller.interval | quote }}
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: {{ $.Values.workloadAPI.socket | quote }}
+          ports:
+            - name: ops
+              containerPort: 9090
+              protocol: TCP
+          {{- include "spiffe-lab.probes" $ | nindent 10 }}
+          securityContext:
+            {{- include "spiffe-lab.containerSecurityContext" $ | nindent 12 }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "spiffe-lab.workloadAPIMount" $ | nindent 12 }}
+      volumes:
+        {{- include "spiffe-lab.workloadAPIVolume" (dict "driver" $.Values.spire.workload.csiDriver) | nindent 8 }}
+{{- end }}
