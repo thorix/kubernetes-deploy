@@ -1,0 +1,48 @@
+{{- /*
+HTTPRoute that publishes this release's OIDC discovery provider through an
+existing TLS-terminating Gateway. Omitted until oidc.httpRoute.hostname is set
+(env overlay).
+
+The provider runs with tls.spire.enabled: false, so its nginx sidecar serves
+plain HTTP on the Service's http port. Only the discovery document and the
+JWKS are routed.
+
+The provider answers only for the hosts in its domains list, which the chart
+derives from global.spire.jwtIssuer. So the route hostname must be the issuer's
+host, or every request would get a 400.
+*/ -}}
+{{- $route := .Values.oidc.httpRoute }}
+{{- if and (index .Values.spire "spiffe-oidc-discovery-provider" "enabled") $route.hostname }}
+{{- $issuer := .Values.spire.global.spire.jwtIssuer | default "" }}
+{{- if ne $issuer (printf "https://%s" $route.hostname) }}
+{{- fail (printf "oidc.httpRoute.hostname %s does not match spire.global.spire.jwtIssuer %q" $route.hostname $issuer) }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-oidc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spire-wrapper.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ required "oidc.httpRoute.parentRef.name is required" $route.parentRef.name }}
+      namespace: {{ required "oidc.httpRoute.parentRef.namespace is required" $route.parentRef.namespace }}
+      {{- with $route.parentRef.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  hostnames:
+    - {{ $route.hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /.well-known/openid-configuration
+        - path:
+            type: Exact
+            value: /keys
+      backendRefs:
+        - name: {{ $route.backend.serviceName | default (printf "%s-spiffe-oidc-discovery-provider" .Release.Name) }}
+          port: {{ $route.backend.port }}
+{{- end }}

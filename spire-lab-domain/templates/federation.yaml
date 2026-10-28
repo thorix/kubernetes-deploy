@@ -1,0 +1,50 @@
+{{- /*
+Federation with the peer trust domain: one ClusterFederatedTrustDomain, profile
+https_spiffe. Omitted until federation.peer.bundleEndpointURL is set (env
+overlay), so a base render stays valid. Once it is set, the other peer settings
+are required.
+
+The object carries both the class label and spec.className. Each release's
+controller-manager runs with filterByClassName and acts only on its own class.
+
+trustDomainBundle is the bootstrap: the peer's root as a SPIFFE bundle. The
+server needs it to verify the peer endpoint's TLS certificate on the first
+fetch. The controller-manager sends it only when it creates the federation
+relationship (its update check ignores the bundle). After that, the server
+refreshes the peer bundle from the bundle endpoint.
+*/ -}}
+{{- with .Values.federation.peer }}
+{{- if .bundleEndpointURL }}
+{{- $peerTD := required "federation.peer.trustDomain is required when federation.peer.bundleEndpointURL is set" .trustDomain }}
+{{- $ownTD := $.Values.spire.global.spire.trustDomain }}
+{{- if eq $peerTD $ownTD }}
+{{- fail (printf "federation.peer.trustDomain must be the peer, not this release's own trust domain %s" $ownTD) }}
+{{- end }}
+{{- if not (hasPrefix "https://" .bundleEndpointURL) }}
+{{- fail "federation.peer.bundleEndpointURL must be an https:// URL" }}
+{{- end }}
+{{- $bundle := required "federation.peer.trustDomainBundle is required for the https_spiffe profile (bootstrap bundle of the peer)" .trustDomainBundle }}
+{{- $parsed := fromJson $bundle }}
+{{- if not (kindIs "slice" $parsed.keys) }}
+{{- fail "federation.peer.trustDomainBundle must be a SPIFFE bundle (JSON object with a keys array)" }}
+{{- end }}
+{{- $className := required "spire.spire-server.controllerManager.className is required" (index $.Values.spire "spire-server" "controllerManager" "className") }}
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterFederatedTrustDomain
+metadata:
+  name: {{ $.Release.Name }}-{{ $peerTD | replace "." "-" }}
+  labels:
+    {{- include "spire-wrapper.labels" $ | nindent 4 }}
+    spire.spiffe.io/class-name: {{ $className }}
+spec:
+  className: {{ $className }}
+  trustDomain: {{ $peerTD }}
+  bundleEndpointURL: {{ .bundleEndpointURL }}
+  bundleEndpointProfile:
+    type: https_spiffe
+    endpointSPIFFEID: {{ .endpointSPIFFEID | default (printf "spiffe://%s/spire/server" $peerTD) }}
+  trustDomainBundle: |-
+    {{- $bundle | trim | nindent 4 }}
+{{- end }}
+{{- end }}

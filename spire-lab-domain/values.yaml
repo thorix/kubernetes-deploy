@@ -16,14 +16,44 @@
 #   spire.spiffe-oidc-discovery-provider: csiDriverName
 #   vault.secrets.upstreamCA, vault.kubernetes.role
 #
-# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer
-# and bundleEndpoint.loadBalancerIP.
+#   federation.peer.trustDomain
+#
+# Env overlay sets: spire.global.spire.clusterName, spire.global.spire.jwtIssuer,
+# bundleEndpoint.loadBalancerIP, federation.peer.{bundleEndpointURL,
+# trustDomainBundle} and oidc.httpRoute.{hostname,parentRef.sectionName}.
 
 # Federation bundle endpoint exposed on a LoadBalancer IP (wrapper template).
 bundleEndpoint:
   enabled: true
   port: 8443
   loadBalancerIP: ""  # Set in the env overlay (lbipam.cilium.io/ips)
+
+# Federation with the peer trust domain (templates/federation.yaml): one
+# ClusterFederatedTrustDomain, profile https_spiffe. Not rendered until
+# bundleEndpointURL is set; then trustDomain and trustDomainBundle are required.
+federation:
+  peer:
+    trustDomain: ""        # Per release: the other lab trust domain
+    bundleEndpointURL: ""  # Env overlay: https://<peer bundle endpoint>:8443
+    endpointSPIFFEID: ""   # Defaults to spiffe://<trustDomain>/spire/server
+    # Env overlay: the peer's root CA as a SPIFFE bundle (JSON), the shape of
+    # `spire-server bundle show -format spiffe`: one keys[] entry with
+    # use x509-svid, kty/crv/x/y and x5c.
+    trustDomainBundle: ""
+
+# OIDC discovery provider published through an existing Gateway
+# (templates/oidc-httproute.yaml). Not rendered until hostname is set; the
+# hostname must be the host of spire.global.spire.jwtIssuer.
+oidc:
+  httpRoute:
+    hostname: ""  # Env overlay
+    parentRef:
+      name: https-gateway
+      namespace: kube-system
+      sectionName: ""  # Env overlay: the Gateway listener; empty attaches to all
+    backend:
+      serviceName: ""  # Defaults to <release>-spiffe-oidc-discovery-provider
+      port: 80         # The provider Service's http port (nginx, plain HTTP)
 
 # Vault integration: the upstream CA reaches the cluster through VSO as the
 # Secret named by spire.spire-server.upstreamAuthority.disk.secret.name. VSO
