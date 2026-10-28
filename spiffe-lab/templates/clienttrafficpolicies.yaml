@@ -1,0 +1,66 @@
+{{- /*
+Per-listener client settings on the Gateway.
+
+Every listener strips any client-supplied identity header
+(gateway.jwt.subHeader) as an early header mutation, before routing and
+before any HTTP filter. On the JWT listener the header is then added only by
+the JWT filter from the verified sub claim; the filter appends rather than
+replaces, so without the early remove a forged value would reach the
+upstream first. On the mTLS listeners nothing adds it.
+
+The two mTLS listeners also require a client certificate that chains to the
+workload trust domain's root (gateway.clientCA) and reject the handshake
+otherwise.
+
+  gw-https         JWT listener: header strip only.
+  gw-mtls          also requires a URI SAN equal to the client's SPIFFE ID, so
+                   any other workload's valid certificate fails the handshake.
+  gw-mtls-control  CA check only. A caller that completes this handshake holds
+                   a valid, current certificate, which proves a handshake
+                   failure on the mtls listener is the SAN check.
+*/ -}}
+{{- $gw := .Values.gateway }}
+{{- $labels := include "spiffe-lab.labels" (dict "root" . "name" "gateway") }}
+{{- $clientID := include "spiffe-lab.clientID" . }}
+{{- $policies := list
+  (dict "name" "gw-https" "listener" $gw.listeners.jwt "mtls" false "uris" (list))
+  (dict "name" "gw-mtls" "listener" $gw.listeners.mtls "mtls" true "uris" (list $clientID))
+  (dict "name" "gw-mtls-control" "listener" $gw.listeners.mtlsControl "mtls" true "uris" (list))
+}}
+{{- range $p := $policies }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ $gw.namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gw.name }}
+      sectionName: {{ $p.listener }}
+  headers:
+    earlyRequestHeaders:
+      remove:
+        - {{ $gw.jwt.subHeader }}
+  {{- if $p.mtls }}
+  tls:
+    clientValidation:
+      mode: RequireAndVerify
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: {{ $gw.clientCA.configMapName }}
+      {{- with $p.uris }}
+      subjectAltNames:
+        uris:
+          {{- range . }}
+          - type: Exact
+            value: {{ . | quote }}
+          {{- end }}
+      {{- end }}
+  {{- end }}
+{{- end }}

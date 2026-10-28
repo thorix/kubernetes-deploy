@@ -10,7 +10,8 @@
 # built in the templates from the values below.
 #
 # Env overlay sets: image.repository, image.tag, server.service.loadBalancerIP,
-# server.service.hostname and the urls.* block.
+# server.service.hostname, the urls.* block, gateway.hostname,
+# gateway.jwt.{issuer,jwksURI} and gateway.clientCA.pem.
 
 image:
   repository: harbor.lan/library/spiffe-lab
@@ -71,12 +72,39 @@ urls:
   gatewayMTLS: ""  # https://<gateway host>:8443
   gatewayMTLSControl: ""  # https://<gateway host>:9443
 
-# Envoy proxy pods allowed to reach the server's upstream port: those owned by
-# the Gateway <namespace>/<name>, running in proxyNamespace.
+# The Envoy Gateway in front of the server's upstream port.
+#   - Network policy: only the proxy pods owned by Gateway <namespace>/<name>,
+#     running in proxyNamespace, may reach :8080.
+#   - Routes (in the server namespace) attach to its listeners, one per path.
+#   - Gateway-scoped objects (ClientTrafficPolicies, the client CA ConfigMap)
+#     go in the Gateway's namespace.
+# Both gateway paths allow exactly one SPIFFE ID: the client's.
 gateway:
   name: infra-gw
   namespace: envoy-gateway-system  # The Gateway object's namespace
   proxyNamespace: envoy-gateway-system  # Where its Envoy proxy pods run
+  hostname: ""  # Required (env overlay): route hostname, the listeners' hostname
+  # Listener names on the Gateway.
+  listeners:
+    jwt: https  # Path 3: Bearer JWT-SVID, /hello (authorized) and /control
+    mtls: mtls  # Path 4: client certificate, SAN must be an allowed ID
+    mtlsControl: mtls-control  # Path 4 control: same CA, no SAN check
+  # Path 3: JWT-SVIDs from the workload trust domain's OIDC discovery provider.
+  # The audience is caller.gatewayAudience.
+  jwt:
+    provider: workload  # Provider name in the SecurityPolicies
+    issuer: ""  # Required (env overlay): the domain's jwtIssuer
+    jwksURI: ""  # Required (env overlay): <issuer>/keys
+    cacheDuration: 60s
+    # The verified sub claim is forwarded to the upstream in this header. Every
+    # listener strips a client-supplied copy first (ClientTrafficPolicies).
+    subHeader: X-Spiffe-Id
+  # Path 4: trust anchor for client certificates, published as a ConfigMap with
+  # key ca.crt (the format Envoy Gateway reads). A static copy of the workload
+  # domain's root, not the SPIRE bundle ConfigMap, which uses another key.
+  clientCA:
+    configMapName: workload-lab-root
+    pem: ""  # Required (env overlay): PEM root certificate
 
 # Metrics scraper allowed to reach :9090.
 scraper:

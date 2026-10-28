@@ -1,6 +1,6 @@
 apiVersion: v2
 name: spiffe-lab
-description: SPIFFE lab workloads (server, client, intruder) across two federated SPIRE trust domains, with their namespaces, ClusterSPIFFEIDs and CiliumNetworkPolicies.
+description: SPIFFE lab workloads (server, client, intruder) across two federated SPIRE trust domains, with their namespaces, ClusterSPIFFEIDs, CiliumNetworkPolicies and Envoy Gateway routes and policies.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
