@@ -1,0 +1,31 @@
+{{- $host := required "hostname is required" .Values.hostname }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: infra-gw
+  namespace: {{ .Release.Namespace }}
+spec:
+  gatewayClassName: envoy
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: infra-gw-proxy
+  listeners:
+  {{- range $l := list (dict "name" "https" "port" 443) (dict "name" "mtls" "port" 8443) (dict "name" "mtls-control" "port" 9443) }}
+  - name: {{ $l.name }}
+    port: {{ $l.port }}
+    protocol: HTTPS
+    hostname: {{ $host | quote }}
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: infra-gw-tls
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector:
+          matchLabels:
+            spiffe.lab/td: infra
+  {{- end }}

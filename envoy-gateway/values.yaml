@@ -1,0 +1,5 @@
+# gateway-helm values. CRDs (Gateway API and Envoy Gateway) come from other
+# apps; the chart's CRD subchart would also add the Gateway API safe-upgrade
+# policy, so it must stay disabled.
+crds:
+  enabled: false
