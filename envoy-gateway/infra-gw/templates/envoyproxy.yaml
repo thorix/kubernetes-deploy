@@ -29,3 +29,23 @@ spec:
         - type: File
           file:
             path: /dev/stdout
+      # Listener-level log for downstream TLS handshake failures (a rejected
+      # client certificate never reaches a route, so the setting above never
+      # sees it). A typed setting is applied as-is: no implicit NR filter.
+      # The CEL attribute is absent unless the downstream transport failed,
+      # and a missing attribute evaluates to false, so only failures log.
+      # FILTER_CHAIN_NAME is the Gateway listener name (<ns>/<gateway>/<listener>).
+      - type: Listener
+        matches:
+        - 'connection.transport_failure_reason != ""'
+        format:
+          type: Text
+          # Folded with clip chomping (">"), so the format ends in a newline.
+          text: >
+            [%START_TIME%] listener=%FILTER_CHAIN_NAME% local=%DOWNSTREAM_LOCAL_ADDRESS%
+            sni=%REQUESTED_SERVER_NAME% tls_fail="%DOWNSTREAM_TRANSPORT_FAILURE_REASON%"
+            peer_uri_san="%DOWNSTREAM_PEER_URI_SAN%"
+        sinks:
+        - type: File
+          file:
+            path: /dev/stdout
