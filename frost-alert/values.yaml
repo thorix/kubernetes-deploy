@@ -21,6 +21,7 @@ configMap:
         alert_low_f: 36.0
         trend_lookahead_h: 3
         forecast_deviation_f: 2.0
+        forecast_offset_f: 5.0
       windows:
         forecast_lookahead_h: 24
         tonight_alert_h: 12
