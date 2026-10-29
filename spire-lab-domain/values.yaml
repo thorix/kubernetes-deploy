@@ -39,7 +39,8 @@ federation:
     endpointSPIFFEID: ""   # Defaults to spiffe://<trustDomain>/spire/server
     # Env overlay: the peer's root CA as a SPIFFE bundle (JSON), the shape of
     # `spire-server bundle show -format spiffe`: one keys[] entry with
-    # use x509-svid, kty/crv/x/y and x5c.
+    # use x509-svid, kty/crv/x/y and x5c, plus spiffe_refresh_hint (required,
+    # seconds; e.g. 300) so a failed first fetch is retried promptly.
     trustDomainBundle: ""
 
 # OIDC discovery provider published through an existing Gateway
