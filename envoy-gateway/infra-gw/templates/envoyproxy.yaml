@@ -18,7 +18,10 @@ spec:
       settings:
       - format:
           type: Text
-          text: >-
+          # Folded with clip chomping (">"), so the format ends in a newline.
+          # Envoy writes a custom text format as given; without the newline
+          # entries run together on one line.
+          text: >
             [%START_TIME%] "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%"
             %RESPONSE_CODE% %RESPONSE_FLAGS% tls_fail="%DOWNSTREAM_TRANSPORT_FAILURE_REASON%"
             peer_uri_san="%DOWNSTREAM_PEER_URI_SAN%" upstream=%UPSTREAM_HOST%
