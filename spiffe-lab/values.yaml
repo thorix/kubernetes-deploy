@@ -63,8 +63,8 @@ caller:
   interval: 30s
   gatewayAudience: infra-gw
 
-# URLs the client and intruder call. The direct ones are required. A gateway
-# URL left empty makes the binary skip that path.
+# URLs the client and intruder call. All five are required and must be https;
+# the binary refuses to start otherwise.
 urls:
   directMTLS: ""  # https://<server LB host>:8443
   directJWT: ""  # https://<server LB host>:9443

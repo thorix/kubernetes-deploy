@@ -4,6 +4,9 @@ EXPECT differ, so any difference in outcome comes from the server's allow list.
 */}}
 {{- $directMTLS := required "urls.directMTLS is required" .Values.urls.directMTLS }}
 {{- $directJWT := required "urls.directJWT is required" .Values.urls.directJWT }}
+{{- $gatewayJWT := required "urls.gatewayJWT is required" .Values.urls.gatewayJWT }}
+{{- $gatewayMTLS := required "urls.gatewayMTLS is required" .Values.urls.gatewayMTLS }}
+{{- $gatewayMTLSControl := required "urls.gatewayMTLSControl is required" .Values.urls.gatewayMTLSControl }}
 {{- range $c := list (dict "role" "client" "cfg" .Values.client "expect" "allow") (dict "role" "intruder" "cfg" .Values.intruder "expect" "deny") }}
 {{- $ns := $c.cfg.namespace }}
 {{- $name := $c.cfg.serviceAccount }}
@@ -58,18 +61,12 @@ spec:
               value: {{ $directMTLS | quote }}
             - name: DIRECT_JWT_URL
               value: {{ $directJWT | quote }}
-            {{- with $.Values.urls.gatewayJWT }}
             - name: GW_JWT_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with $.Values.urls.gatewayMTLS }}
+              value: {{ $gatewayJWT | quote }}
             - name: GW_MTLS_URL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- with $.Values.urls.gatewayMTLSControl }}
+              value: {{ $gatewayMTLS | quote }}
             - name: GW_MTLS_CONTROL_URL
-              value: {{ . | quote }}
-            {{- end }}
+              value: {{ $gatewayMTLSControl | quote }}
             - name: GW_AUDIENCE
               value: {{ $.Values.caller.gatewayAudience | quote }}
             - name: INTERVAL
