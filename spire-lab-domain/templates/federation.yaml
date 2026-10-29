@@ -12,6 +12,11 @@ server needs it to verify the peer endpoint's TLS certificate on the first
 fetch. The controller-manager sends it only when it creates the federation
 relationship (its update check ignores the bundle). After that, the server
 refreshes the peer bundle from the bundle endpoint.
+
+The bootstrap must carry spiffe_refresh_hint, and the template fails without
+it. If the first fetch fails, for example because both servers start
+together, SPIRE schedules the retry from the stored bundle's hint. Without a
+hint it uses the root lifetime / 10 / 4, which is months for a long-lived root.
 */ -}}
 {{- with .Values.federation.peer }}
 {{- if .bundleEndpointURL }}
@@ -27,6 +32,9 @@ refreshes the peer bundle from the bundle endpoint.
 {{- $parsed := fromJson $bundle }}
 {{- if not (kindIs "slice" $parsed.keys) }}
 {{- fail "federation.peer.trustDomainBundle must be a SPIFFE bundle (JSON object with a keys array)" }}
+{{- end }}
+{{- if not (and (hasKey $parsed "spiffe_refresh_hint") (gt (int $parsed.spiffe_refresh_hint) 0)) }}
+{{- fail "federation.peer.trustDomainBundle must set spiffe_refresh_hint (seconds, > 0); without it a failed first fetch of the peer bundle is not retried for months" }}
 {{- end }}
 {{- $className := required "spire.spire-server.controllerManager.className is required" (index $.Values.spire "spire-server" "controllerManager" "className") }}
 ---
