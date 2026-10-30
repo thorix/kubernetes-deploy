@@ -33,7 +33,7 @@ configMap:
         - start: "2026-04-01"
           end:   "2026-06-15"
         - start: "2026-09-01"
-          end:   "2026-10-31"
+          end:   "2026-11-30"
       sensor:
         query_current: 'avg_over_time({__name__="sensor.gw2000b_outdoor_temperature_value"}[5m])'
         query_trend:   '{__name__="sensor.gw2000b_outdoor_temperature_value"}[1h]'
