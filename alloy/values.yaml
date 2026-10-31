@@ -102,9 +102,15 @@ alloy:
   resources:
     requests:
       cpu: 25m
-      memory: 64Mi
+      memory: 128Mi
+    # Working set sat at the old 256Mi limit, where the Go runtime spends its
+    # time in GC instead of serving /-/ready (1s probe timeout). Under memory
+    # pressure the config-reloader's /-/reload calls time out too, so a config
+    # change never takes effect on the pod that most needs it. A limit with
+    # real headroom keeps both endpoints responsive; this change also rolls
+    # the DaemonSet, which applies the node-scoped discovery config cleanly.
     limits:
-      memory: 256Mi
+      memory: 512Mi
 
 controller:
   type: daemonset
