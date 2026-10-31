@@ -59,7 +59,12 @@ image:
   # fixable-vulnerability counts and an image_repo label. The exit code separates
   # a meaningless scan (non-zero) from a partial one (zero, surfaced through
   # metrics).
-  tag: v0.8.0-thorix
+  #
+  # v0.8.1 records every namespace before the List calls start, so concurrent
+  # List failures can no longer crash the scan; a closed report pipe now exits
+  # with the reports-failed code instead of a signal; and the logged metrics
+  # endpoint masks every query value.
+  tag: v0.8.1-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
