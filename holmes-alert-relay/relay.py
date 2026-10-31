@@ -200,23 +200,64 @@ def _ident_key(alert: dict) -> str:
     return f"{name}/{_scope(alert)}"
 
 
+PAGE_SIZE = 50   # Vikunja's default page size for task and comment lists
+MAX_PAGES = 50
+
+
+class ListTruncated(RuntimeError):
+    """A paged Vikunja list was longer than MAX_PAGES: its contents are unknown."""
+
+
+def _vk_pages(path: str, what: str) -> list:
+    """Every item of a paged Vikunja list, in server order.
+
+    Raises on any HTTP/JSON error, and raises ListTruncated at the page cap: a
+    half-read list must never look complete, or a caller would file a
+    duplicate ticket or compare against a stale marker.
+    """
+    out: list = []
+    sep = "&" if "?" in path else "?"
+    for page in range(1, MAX_PAGES + 1):
+        batch = _vk("GET", f"{path}{sep}per_page={PAGE_SIZE}&page={page}")
+        if batch is None:
+            batch = []
+        if not isinstance(batch, list):
+            raise ValueError(f"unexpected vikunja {what} response")
+        out.extend(batch)
+        if len(batch) < PAGE_SIZE:
+            return out
+    log.warning("vikunja %s hit the %d-page cap; treating it as unknown, retry later", what, MAX_PAGES)
+    raise ListTruncated(f"vikunja {what} longer than {MAX_PAGES} pages")
+
+
 def _search_tasks(s: str) -> list[dict]:
     """All tasks in the project whose text matches `s`, across every page.
 
-    Raises on any HTTP/JSON error: a half-read list must never look like "no
-    such task", or the caller would file a duplicate.
+    Raises on any HTTP/JSON error or at the page cap: a half-read list must
+    never look like "no such task", or the caller would file a duplicate.
     """
-    out: list[dict] = []
     q = urllib.parse.quote(s, safe="")
-    for page in range(1, 51):
-        batch = _vk("GET", f"/projects/{VIKUNJA_PROJECT_ID}/tasks?s={q}&per_page=50&page={page}")
-        if not isinstance(batch, list):
-            raise ValueError("unexpected vikunja list response")
-        out.extend(batch)
-        if len(batch) < 50:
-            return out
-    log.error("vikunja search for %r hit the 50-page cap; results truncated", s)
-    return out
+    return _vk_pages(f"/projects/{VIKUNJA_PROJECT_ID}/tasks?s={q}", "task search")
+
+
+def _set_done(tid, done: bool, still_wanted=None) -> bool:
+    """Mark a task done or not done, keeping every other field.
+
+    Vikunja's POST /tasks/{id} saves the whole body: a field left out is
+    stored empty, so a bare {"id", "done"} erases the description. Read the
+    task and send it back with only `done` changed. `still_wanted`, if given,
+    runs after the read and right before the write; False skips the write.
+    Returns True if the write was sent. Raises on any HTTP/JSON error.
+    """
+    task = _vk("GET", f"/tasks/{tid}")
+    if not isinstance(task, dict) or task.get("id") != tid:
+        raise ValueError("unexpected vikunja task response")
+    if still_wanted is not None and not still_wanted():
+        return False
+    body = dict(task)
+    body["done"] = done
+    _vk("POST", f"/tasks/{tid}", body)
+    return True
 
 
 def _pick(tasks: list[dict], title: str) -> tuple[dict | None, dict | None]:
@@ -236,6 +277,8 @@ def _find_tasks(title: str) -> tuple[dict | None, dict | None]:
     """Return (open task, most-recently-closed task) matching this title (exact)."""
     try:
         tasks = _search_tasks(title)
+    except ListTruncated:
+        raise  # unknown, not empty: the caller must not file a duplicate
     except Exception as exc:  # noqa: BLE001
         log.error("vikunja list failed: %s", exc)
         return None, None
@@ -277,7 +320,7 @@ def _upsert_task(alert: dict, analysis: str) -> None:
         return
     if closed_t and _within_reopen_window(closed_t):
         tid = closed_t["id"]
-        _vk("POST", f"/tasks/{tid}", {"id": tid, "done": False})  # reopen
+        _set_done(tid, False)  # reopen
         _vk("PUT", f"/tasks/{tid}/comments",
             {"comment": "<p><b>Alert refired — reopened.</b> Latest HolmesGPT diagnosis:<br>"
                         + _analysis_html(analysis) + "</p>"})
@@ -314,7 +357,7 @@ def _close_task_by_title(title: str) -> None:
     if not open_t:
         return  # nothing open to close (already closed, or never created)
     try:
-        _vk("POST", f"/tasks/{open_t['id']}", {"id": open_t["id"], "done": True})
+        _set_done(open_t["id"], True)
         log.info("closed task %s (%s) — alert stayed resolved", open_t["id"], title)
     except Exception as exc:  # noqa: BLE001
         log.error("vikunja close failed for %s: %s", title, exc)
@@ -473,8 +516,8 @@ def _wo_upsert(alert: dict) -> None:
     h = _wo_hash(alert)
     if open_t:
         tid = open_t["id"]
-        comments = _vk("GET", f"/tasks/{tid}/comments")
-        if _last_marker(open_t.get("description") or "", comments if isinstance(comments, list) else []) == h:
+        comments = _vk_pages(f"/tasks/{tid}/comments", "comment list")
+        if _last_marker(open_t.get("description") or "", comments) == h:
             log.info("work order %s unchanged (%s)", tid, title)
             return
         _vk("PUT", f"/tasks/{tid}/comments",
@@ -483,7 +526,7 @@ def _wo_upsert(alert: dict) -> None:
         return
     if closed_t and _within_reopen_window(closed_t):
         tid = closed_t["id"]
-        _vk("POST", f"/tasks/{tid}", {"id": tid, "done": False})  # reopen
+        _set_done(tid, False)  # reopen
         _vk("PUT", f"/tasks/{tid}/comments",
             {"comment": "<p><b>Alert refired — reopened.</b></p>" + _images_html(alert) + _wo_marker(h)})
         log.info("reopened work-order task %s (%s)", tid, title)
@@ -539,6 +582,12 @@ def _wo_process(item: tuple, now: float | None = None) -> None:
                 _pending_close[key] = (now + WORK_ORDER_CLOSE_GRACE_MINUTES * 60, title, "wo", ns)
         log.info("close re-armed for '%s' (%s)", title, why)
 
+    def still_armed() -> bool:
+        # A firing cancels the entry; a firing then a resolve replaces it. In
+        # either case this close is stale, so the newer state wins.
+        with _pending_lock:
+            return _pending_close.get(key) == entry
+
     if _inventory_hold(ns):
         rearm("held: inventory incomplete or unknown")
         return
@@ -547,7 +596,11 @@ def _wo_process(item: tuple, now: float | None = None) -> None:
     try:
         open_t, _ = _pick(_search_tasks(title), title)
         if open_t:
-            _vk("POST", f"/tasks/{open_t['id']}", {"id": open_t["id"], "done": True})
+            # The hold check and the reads above take seconds; re-check right
+            # before the write so a firing that arrived meanwhile keeps it open.
+            if not _set_done(open_t["id"], True, still_wanted=still_armed):
+                log.info("close of '%s' dropped: alert refired meanwhile", title)
+                return
             log.info("closed work-order task %s (%s)", open_t["id"], title)
     except Exception as exc:  # noqa: BLE001
         log.error("work-order close failed for %s: %s", title, exc)
@@ -598,7 +651,8 @@ def _reconcile_work_orders() -> int:
 
 
 def _handle_alerts(data: dict) -> dict:
-    counts = {"queued": 0, "deduped": 0, "queue-full": 0, "resolved": 0, "skipped": 0, "work-order": 0}
+    counts = {"queued": 0, "deduped": 0, "queue-full": 0, "resolved": 0, "skipped": 0, "work-order": 0,
+              "work-order-queue-full": 0}
     for alert in data.get("alerts", []) or []:
         status = alert.get("status")
         if _is_work_order(alert):
@@ -608,7 +662,7 @@ def _handle_alerts(data: dict) -> dict:
                     _wo_queue.put_nowait(("upsert", alert))
                     counts["work-order"] += 1
                 except queue.Full:
-                    counts["queue-full"] += 1
+                    counts["work-order-queue-full"] += 1
             elif status == "resolved":
                 _schedule_close(alert, WORK_ORDER_CLOSE_GRACE_MINUTES, kind="wo")
                 counts["work-order"] += 1
@@ -658,6 +712,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         counts = _handle_alerts(data)
         log.info("webhook: %s (qsize=%d)", counts, _work.qsize())
+        if counts["work-order-queue-full"]:
+            # A dropped work order would otherwise wait for the next repeat.
+            # Alertmanager retries a 5xx, and a re-sent batch is safe: work-order
+            # upserts are idempotent and Holmes alerts are deduped.
+            self._send(503, json.dumps(counts))
+            return
         self._send(200, json.dumps(counts))
 
 

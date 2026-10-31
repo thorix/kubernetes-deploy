@@ -122,7 +122,12 @@ def wo_alert(ns=NS_A, status="firing", images="img-one:1\nimg-two:2", summary="2
 
 
 class FakeVikunja:
-    """Stands in for relay._vk; records every call."""
+    """Stands in for relay._vk; records every call.
+
+    Models the two Vikunja behaviours the relay depends on: lists are paged
+    (`per_page`, `page`), and POST /tasks/{id} saves the whole body, so a field
+    left out of it (here: description, labels) is stored empty.
+    """
 
     def __init__(self, tasks=None):
         self.tasks = list(tasks or [])
@@ -151,17 +156,30 @@ class FakeVikunja:
         if m:
             tid = int(m.group(1))
             if method == "GET":
-                return list(self.comments.get(tid, []))
+                per, page = int(q.get("per_page", ["50"])[0]), int(q.get("page", ["1"])[0])
+                return list(self.comments.get(tid, []))[(page - 1) * per: page * per]
             self.comments.setdefault(tid, []).append({"comment": payload["comment"]})
             return {}
         m = _re.fullmatch(r"/tasks/(\d+)", p.path)
+        if m and method == "GET":
+            return dict(self._task(int(m.group(1))))
         if m and method == "POST":
-            for t in self.tasks:
-                if t["id"] == int(m.group(1)):
-                    t["done"] = payload["done"]
-                    t["done_at"] = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if payload["done"] else ""
-            return {}
+            t = self._task(int(m.group(1)))
+            saved = {"description": "", "labels": None}  # omitted -> stored empty
+            saved.update(payload)
+            saved["id"] = t["id"]
+            saved.setdefault("title", t["title"])
+            saved["done_at"] = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if payload["done"] else ""
+            t.clear()
+            t.update(saved)
+            return dict(t)
         raise AssertionError(f"unexpected call {method} {path}")
+
+    def _task(self, tid):
+        for t in self.tasks:
+            if t["id"] == tid:
+                return t
+        raise RuntimeError(f"HTTP 404 task {tid}")
 
     def puts(self):
         return [c for c in self.calls if c[0] == "PUT" and c[1] == "/projects/8/tasks"]
@@ -542,6 +560,198 @@ class TestClose(RelayCase):
         self.assertEqual(len(self._closed_titles()), 2)
         self.assertEqual(relay._pending_close, {})
         self.assertIn("alertname%3D%22ImageInquisitorInventoryIncomplete%22", self.am_calls[0])
+
+
+class TestFieldsSurvive(RelayCase):
+    """Close and reopen must not wipe the task: Vikunja stores an omitted
+    field as empty, so every done update sends the whole current task."""
+
+    HOLMES = "[alert] PodNotReady — x"
+
+    def _holmes(self, status):
+        return {"status": status, "labels": {"alertname": "PodNotReady", "namespace": "x", "severity": "critical"}}
+
+    def _decorate(self, t):
+        t.update(labels=[{"id": 3, "title": "cve"}], priority=4)
+
+    def _assert_kept(self, t, description):
+        self.assertEqual(t["description"], description)
+        self.assertEqual(t["labels"], [{"id": 3, "title": "cve"}])
+        self.assertEqual(t["priority"], 4)
+
+    def test_work_order_close_keeps_fields(self):
+        self.fire(wo_alert())
+        t = self.vk.tasks[0]
+        desc = t["description"]
+        self._decorate(t)
+        relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+        self.expire()
+        self.assertTrue(t["done"])
+        self._assert_kept(t, desc)
+        body = self.vk.closes()[0][2]
+        self.assertEqual((body["title"], body["description"]), (WO_TITLE, desc))
+
+    def test_work_order_reopen_keeps_fields(self):
+        self.fire(wo_alert())
+        t = self.vk.tasks[0]
+        desc = t["description"]
+        self._decorate(t)
+        relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+        self.expire()
+        self.fire(wo_alert())
+        self.assertFalse(t["done"])
+        self._assert_kept(t, desc)
+
+    def test_holmes_close_keeps_fields(self):
+        self.vk.tasks.append({"id": 1, "title": self.HOLMES, "description": "<p>root cause</p>", "done": False})
+        self._decorate(self.vk.tasks[0])
+        relay._handle_alerts({"alerts": [self._holmes("resolved")]})
+        relay._reap_once(__import__("time").time() + 11 * 60)
+        self.assertTrue(self.vk.tasks[0]["done"])
+        self._assert_kept(self.vk.tasks[0], "<p>root cause</p>")
+
+    def test_holmes_reopen_keeps_fields(self):
+        now = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.vk.tasks.append({"id": 1, "title": self.HOLMES, "description": "<p>root cause</p>",
+                              "done": True, "done_at": now})
+        self._decorate(self.vk.tasks[0])
+        relay._upsert_task(self._holmes("firing"), "still broken")
+        self.assertFalse(self.vk.tasks[0]["done"])
+        self._assert_kept(self.vk.tasks[0], "<p>root cause</p>")
+        self.assertEqual(self.vk.n_comments(), 1)
+
+
+class TestCloseRecheck(RelayCase):
+    """A firing that lands while the close worker is reading (AM hold check,
+    search, task read) must still keep the task open."""
+
+    def _arm(self):
+        self.fire(wo_alert())
+        relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+        t = __import__("time").time() + 181 * 60
+        relay._reap_once(t)
+        return t, relay._wo_queue.get_nowait()
+
+    def _during_task_read(self, *batches):
+        orig = self.vk.__call__
+        sent = {"done": False}
+
+        def hook(method, path, payload=None):
+            if method == "GET" and _re.fullmatch(r"/tasks/\d+", path) and not sent["done"]:
+                sent["done"] = True
+                for b in batches:
+                    relay._handle_alerts({"alerts": [b]})
+            return orig(method, path, payload)
+        return mock.patch.object(relay, "_vk", hook)
+
+    def test_firing_during_task_read_keeps_open(self):
+        t, close = self._arm()
+        with self._during_task_read(wo_alert()):
+            relay._wo_process(close, now=t)
+        self.assertEqual(self.vk.closes(), [])
+        self.assertFalse(self.vk.tasks[0]["done"])
+        self.assertEqual(relay._pending_close, {})
+
+    def test_firing_in_hold_check_keeps_open(self):
+        t, close = self._arm()
+        orig = self._am
+
+        def am(path):
+            relay._handle_alerts({"alerts": [wo_alert()]})
+            return orig(path)
+        with mock.patch.object(relay, "_am_get", am):
+            relay._wo_process(close, now=t)
+        self.assertEqual(self.vk.closes(), [])
+
+    def test_refire_then_resolve_during_read_defers_to_new_entry(self):
+        t, close = self._arm()
+        key = relay._ident_key(wo_alert())
+        with self._during_task_read(wo_alert(), wo_alert(status="resolved")):
+            relay._wo_process(close, now=t)
+        self.assertEqual(self.vk.closes(), [])
+        self.assertIn(key, relay._pending_close)  # the newer close stays armed
+        while not relay._wo_queue.empty():  # drop the refire's upsert
+            relay._wo_queue.get_nowait()
+        self.expire(minutes=181 * 2)
+        self.assertEqual(len(self.vk.closes()), 1)
+
+
+class TestWebhookStatus(RelayCase):
+    """Alertmanager retries a 5xx, not a 2xx: a work order dropped because its
+    queue is full must get a retry instead of waiting for the next repeat."""
+
+    def _post(self, alerts):
+        import io
+        body = __import__("json").dumps({"alerts": alerts}).encode()
+        h = relay.Handler.__new__(relay.Handler)
+        h.path = "/alert"
+        h.headers = {"Content-Length": str(len(body))}
+        h.rfile = io.BytesIO(body)
+        sent = []
+        h._send = lambda code, text="": sent.append((code, __import__("json").loads(text or "{}")))
+        h.do_POST()
+        return sent[0]
+
+    def _full(self, attr):
+        qq = _q.Queue(maxsize=1)
+        qq.put_nowait(("filler",))
+        return mock.patch.object(relay, attr, qq)
+
+    def test_work_order_queue_full_returns_503(self):
+        with self._full("_wo_queue"):
+            code, counts = self._post([wo_alert()])
+        self.assertEqual((code, counts["work-order-queue-full"]), (503, 1))
+
+    def test_holmes_queue_full_still_200(self):
+        crit = {"status": "firing", "labels": {"alertname": "PodNotReady", "namespace": "x", "severity": "critical"}}
+        with self._full("_work"):
+            code, counts = self._post([crit])
+        self.assertEqual((code, counts["queue-full"]), (200, 1))
+
+    def test_normal_batch_returns_200(self):
+        code, counts = self._post([wo_alert(), wo_alert(ns=NS_B, status="resolved")])
+        self.assertEqual((code, counts["work-order"]), (200, 2))
+
+
+class TestPaging(RelayCase):
+    def test_comment_dedup_reads_every_page(self):
+        self.fire(wo_alert())
+        tid = self.vk.tasks[0]["id"]
+        stale = "<!-- relay:wo h=aaaaaaaaaaaa -->"
+        self.vk.comments[tid] = [{"comment": "<p>old</p>" + stale} for _ in range(60)]
+        changed = wo_alert(images="img-one:1\nimg-three:3")
+        self.fire(changed)            # marker differs from the stale one: one comment
+        self.assertEqual(self.vk.n_comments(), 61)
+        self.fire(changed)            # its marker is on page 2: no second comment
+        self.assertEqual(self.vk.n_comments(), 61)
+
+    def _over_cap(self):
+        n = relay.MAX_PAGES * relay.PAGE_SIZE + 10
+        self.vk.tasks = [{"id": i, "title": f"{WO_TITLE} n{i}", "done": False} for i in range(n)]
+
+    def test_search_cap_creates_nothing_and_warns(self):
+        self._over_cap()
+        with self.assertLogs(relay.log, "WARNING") as logs:
+            self.fire(wo_alert())
+        self.assertEqual(self.vk.puts(), [])
+        self.assertTrue(any("page cap" in m for m in logs.output))
+
+    def test_holmes_search_cap_files_nothing(self):
+        self.vk.tasks = [{"id": i, "title": f"[alert] PodNotReady — x n{i}", "done": False}
+                         for i in range(relay.MAX_PAGES * relay.PAGE_SIZE + 10)]
+        a = {"status": "firing", "labels": {"alertname": "PodNotReady", "namespace": "x", "severity": "critical"}}
+        with self.assertLogs(relay.log, "WARNING"):
+            with self.assertRaises(relay.ListTruncated):
+                relay._upsert_task(a, "x")
+        self.assertEqual(self.vk.puts(), [])
+
+    def test_close_at_search_cap_rearms(self):
+        relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+        self._over_cap()
+        with self.assertLogs(relay.log, "WARNING"):
+            self.expire()
+        self.assertEqual(self.vk.closes(), [])
+        self.assertEqual(len(relay._pending_close), 1)
 
 
 class TestReconcile(RelayCase):
