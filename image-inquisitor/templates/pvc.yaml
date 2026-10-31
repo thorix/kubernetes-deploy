@@ -1,6 +1,6 @@
-# Holds the Trivy vulnerability DB (~1.3G) between runs. Without this every run
-# re-downloads it, which is both slow and the thing that trips registry rate
-# limits.
+# Holds the Trivy vulnerability DB and Java DB between runs. Without this every
+# run re-downloads them, which is both slow and the thing that trips registry
+# rate limits.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
