@@ -240,7 +240,7 @@ class TestRouting(RelayCase):
         self.assertTrue(relay._wo_queue.empty())
         self.assertEqual(relay._handle_alerts({"alerts": [a]})["deduped"], 1)
 
-    def test_critical_resolved_uses_holmes_grace(self):  # trufflehog:ignore
+    def test_critical_resolved_arms_close_with_holmes_grace(self):
         a = {"status": "resolved", "labels": {"alertname": "PodNotReady", "namespace": "x", "severity": "critical"}}
         before = __import__("time").time()
         self.assertEqual(relay._handle_alerts({"alerts": [a]})["resolved"], 1)
@@ -427,7 +427,7 @@ class TestClose(RelayCase):
         self.assertEqual(len(self.vk.closes()), 1)
         self.assertEqual(relay._pending_close, {})
 
-    def test_close_post_error_rearms_then_closes(self):  # trufflehog:ignore
+    def test_close_post_error_rearms_and_closes(self):
         self.fire(wo_alert())
         relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
         orig = self.vk.__call__
@@ -460,6 +460,24 @@ class TestClose(RelayCase):
             relay._wo_process(relay._wo_queue.get_nowait(), now=t)
         self.assertEqual(len(self.vk.closes()), 1)
         self.assertEqual((relay._pending_close, relay._wo_close_enqueued), ({}, set()))
+
+    def test_refire_and_resolve_during_close_keeps_new_entry(self):
+        self.fire(wo_alert())
+        relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+        orig = self.vk.__call__
+        key = relay._ident_key(wo_alert())
+
+        def mid(method, path, payload=None):
+            r = orig(method, path, payload)
+            if method == "POST":  # firing then resolved arrive during the close
+                relay._handle_alerts({"alerts": [wo_alert()]})
+                relay._handle_alerts({"alerts": [wo_alert(status="resolved")]})
+            return r
+        t = __import__("time").time() + 181 * 60
+        relay._reap_once(t)
+        with mock.patch.object(relay, "_vk", mid):
+            relay._wo_process(relay._wo_queue.get_nowait(), now=t)
+        self.assertIn(key, relay._pending_close)  # the newer entry survives
 
     def test_enqueued_flag_cleared_on_hold(self):
         self.fire(wo_alert())

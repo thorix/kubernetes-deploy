@@ -535,7 +535,7 @@ def _wo_process(item: tuple, now: float | None = None) -> None:
     def rearm(why: str) -> None:
         with _pending_lock:
             _wo_close_enqueued.discard(key)
-            if key in _pending_close:
+            if _pending_close.get(key) == entry:  # never overwrite a newer entry
                 _pending_close[key] = (now + WORK_ORDER_CLOSE_GRACE_MINUTES * 60, title, "wo", ns)
         log.info("close re-armed for '%s' (%s)", title, why)
 
@@ -554,7 +554,8 @@ def _wo_process(item: tuple, now: float | None = None) -> None:
         rearm("close failed")
         return
     with _pending_lock:
-        _pending_close.pop(key, None)  # no-op if a firing cancelled it meanwhile
+        if _pending_close.get(key) == entry:  # a newer entry armed meanwhile stays
+            _pending_close.pop(key, None)
         _wo_close_enqueued.discard(key)
 
 
