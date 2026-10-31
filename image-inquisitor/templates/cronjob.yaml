@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   schedule: {{ .Values.cronjob.schedule | quote }}
+  startingDeadlineSeconds: {{ .Values.cronjob.startingDeadlineSeconds }}
   concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
   successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
@@ -12,6 +13,7 @@ spec:
     spec:
       backoffLimit: {{ .Values.cronjob.backoffLimit }}
       activeDeadlineSeconds: {{ .Values.cronjob.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ .Values.cronjob.ttlSecondsAfterFinished }}
       template:
         spec:
           restartPolicy: Never
@@ -27,19 +29,21 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           initContainers:
-            # Download the Trivy DB exactly once, before any scanning starts.
+            # Download the Trivy DB and the Java DB exactly once, before any
+            # scanning starts.
             #
             # image-inquisitor runs its Trivy scans in parallel workers that all
             # share this cache directory. Trivy's DB cache is not safe for
             # concurrent writers: on a cold cache every worker starts its own
             # download into the same path and they corrupt each other, producing
             # "unable to decode metadata" and "something wrong with DB". The
-            # scans then fail at init and the tool records the image as having
-            # ZERO findings -- so a failed scan is indistinguishable from a
-            # clean image, which is the dangerous part.
+            # scans then fail at init, and the scanner counts each failure
+            # (scan_failed, scan_failures) rather than reporting the image as
+            # clean.
             #
-            # Pre-warming here and setting TRIVY_SKIP_DB_UPDATE below means the
-            # workers only ever read the DB, and it is fetched once per run.
+            # Pre-warming here and setting TRIVY_SKIP_DB_UPDATE and
+            # TRIVY_SKIP_JAVA_DB_UPDATE below means the workers only ever read
+            # the DBs, and each is fetched once per run.
             - name: warm-trivy-db
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -55,6 +59,34 @@ spec:
                   mountPath: /cache
                 - name: tmp-work
                   mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+            # The Java DB, used to identify jar files. Same cache, same
+            # single-writer reasoning as above.
+            - name: warm-trivy-java-db
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["/bin/trivy"]
+              args: ["image", "--download-java-db-only", "--cache-dir", "/cache"]
+              env:
+                - name: TRIVY_JAVA_DB_REPOSITORY
+                  value: {{ .Values.trivy.javaDbRepository | quote }}
+                - name: TMPDIR
+                  value: /tmp
+              volumeMounts:
+                - name: trivy-cache
+                  mountPath: /cache
+                - name: tmp-work
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -78,10 +110,8 @@ spec:
               env:
                 - name: TRIVY_CACHE_DIR
                   value: /cache
-                - name: TRIVY_DB_REPOSITORY
-                  value: {{ .Values.trivy.dbRepository | quote }}
-                # The initContainer already fetched the DB. Without these the
-                # parallel workers each try to refresh it and race one another.
+                # The initContainers already fetched both DBs. Without these the
+                # parallel workers each try to refresh them and race one another.
                 - name: TRIVY_SKIP_DB_UPDATE
                   value: "true"
                 - name: TRIVY_SKIP_JAVA_DB_UPDATE

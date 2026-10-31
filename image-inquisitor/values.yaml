@@ -52,20 +52,33 @@ image:
   # yesterday are already handled, while ones available for months are not. On
   # this cluster that splits 81 criticals still soaking from 147 where the release
   # has been sitting available.
-  tag: v0.7.0-thorix
+  #
+  # v0.8.0 accounts for every image in the inventory: each is either scanned or
+  # counted as failed, by phase (parse, list, registry, trivy), and every network
+  # call has a deadline. Metrics gain per-image workload mapping,
+  # fixable-vulnerability counts and an image_repo label. The exit code separates
+  # a meaningless scan (non-zero) from a partial one (zero, surfaced through
+  # metrics).
+  tag: v0.8.0-thorix
   pullPolicy: IfNotPresent
 
 cronjob:
-  # Once a day, deliberately. Each run refreshes the Trivy vulnerability DB, and
-  # keeping that to one pull per day is the whole reason for the cache PVC and
-  # the Harbor-proxied DB repository below.
+  # Once a day. Each run refreshes the Trivy vulnerability DB and the Java DB
+  # once, before scanning starts; the cache PVC and the Harbor-proxied DB
+  # repositories below keep those refreshes cheap.
   schedule: "0 15 * * *"
+  # A run that has not started within an hour of its slot is skipped rather than
+  # started late.
+  startingDeadlineSeconds: 3600
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
-  backoffLimit: 1
-  # Scanning ~120 images takes a while; do not let a run be reaped mid-scan.
-  activeDeadlineSeconds: 10800
+  backoffLimit: 2
+  # Covers both init containers and the scan.
+  activeDeadlineSeconds: 3600
+  # Finished Jobs are deleted after a week at most; the history limits above
+  # can remove them sooner.
+  ttlSecondsAfterFinished: 604800
 
 sourceID: rye-cluster
 
@@ -102,6 +115,8 @@ trivy:
   # caches it (ghcr-cache/aquasecurity/trivy-db), so repeated pulls are served
   # locally and never hit GHCR's anonymous rate limits.
   dbRepository: harbor.lan/ghcr-cache/aquasecurity/trivy-db
+  # The Java DB, used to identify jar files, through the same proxy.
+  javaDbRepository: harbor.lan/ghcr-cache/aquasecurity/trivy-java-db
 
 resources:
   requests:
