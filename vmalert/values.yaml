@@ -839,9 +839,9 @@ alertmanager:
       repeat_interval: 4h
       routes:
       # Work orders (CVE upgrade tickets). First, continue:false: never Slack,
-      # never the phone. Flipped to holmes-relay once a scheduled scan proves the
-      # alert stable.
-      - receiver: blackhole
+      # never the phone. The relay files one ticket per namespace and skips
+      # Holmes. To pause delivery, point this back at blackhole.
+      - receiver: holmes-relay
         matchers:
         - work_order = cve-upgrade
         continue: false
