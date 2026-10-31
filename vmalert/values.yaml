@@ -493,6 +493,7 @@ server:
         - alert: ImageInquisitorInventoryIncomplete
           expr: max by (phase, namespace) (last_over_time(image_inquisitor_inventory_failures[26h])) > 0
           for: 1h
+          keep_firing_for: 2h
           labels:
             severity: warning
           annotations:
