@@ -4,6 +4,11 @@ server:
   remote:
     write:
       url: http://victoriametrics-victoria-metrics-single-server:8428
+    # Restores `for:` (pending) alert state after a vmalert restart. Every rules
+    # change restarts the pod, so without this each edit would reset every
+    # pending alert and re-delay anything already firing.
+    read:
+      url: http://victoriametrics-victoria-metrics-single-server:8428
   notifier:
     alertmanager:
       # Must be the chart's generated Service name -- release name "vmalert" plus
@@ -410,16 +415,33 @@ server:
           annotations:
             summary: "Loki is discarding logs: {{ $labels.reason }} ({{ $value | humanize }}/s)"
             description: "Sustained log loss for reason '{{ $labels.reason }}'. rate_limited means ingestion_rate_mb is too low for current volume; too_far_behind and greater_than_max_sample_age mean timestamps fall outside the accepted window, usually a producer backfilling or a clock problem. Threshold is 10/s so ordinary bursts do not page."
+      # image-inquisitor scan health. Each rule covers a way the scan can go
+      # wrong while every dashboard keeps rendering the last good result.
+      #   ScanStale / ScanMissing: no run has finished lately, or none ever has.
+      #   JobFailed: a run's Job failed outright (retries exhausted).
+      #   InventoryDrop: the image count fell well below its weekly norm, so
+      #     images may have silently dropped out of scanning.
+      #   ScanFailures: too large a share of images failed the vulnerability scan.
+      #   ImageScanFailing: one specific image fails on consecutive runs.
+      #   InventoryIncomplete: some images could not be listed or parsed, so the
+      #     inventory is partial. An image missing from the inventory could look
+      #     "removed" and close a work order. The alert carries the namespace the
+      #     missing images run in, and the relay holds only that namespace's
+      #     closes. A parse failure whose namespace is unknown (non-Kubernetes
+      #     source) carries no namespace label and holds every close.
+      #   RegistryFailures: registry lookups failed, so digests/tags are unknown.
+      # The once-a-day series are wrapped in last_over_time for the same reason
+      # as above: the bare metric is absent between runs.
       - name: image-inquisitor
         rules:
         - alert: ImageInquisitorScanStale
-          expr: (time() - last_over_time(image_inquisitor_scan_timestamp_seconds[7d])) > 86400 * 2
-          for: 30m
+          expr: (time() - last_over_time(image_inquisitor_scan_timestamp_seconds[7d])) > 26 * 3600
+          for: 1h
           labels:
             severity: warning
           annotations:
             summary: "Image vulnerability scan has not completed in {{ $value | humanizeDuration }}"
-            description: "The daily image-inquisitor scan last finished {{ $value | humanizeDuration }} ago, so the CVE dashboards are showing stale data while looking perfectly normal. Two days allows one missed run before alerting. Check: kubectl get cronjob,job -n image-inquisitor"
+            description: "The daily image-inquisitor scan last finished {{ $value | humanizeDuration }} ago, so the CVE dashboards are showing stale data while looking perfectly normal. 26 hours allows the daily run plus its retries before alerting. Check: kubectl get cronjob,job -n image-inquisitor"
         # absent() is the only way to catch the CronJob being deleted or never
         # having run: with no series at all there is nothing for the staleness
         # comparison above to evaluate.
@@ -431,6 +453,59 @@ server:
           annotations:
             summary: "Image vulnerability scanning has stopped entirely"
             description: "No image-inquisitor scan has been recorded in seven days. The CronJob is likely deleted, suspended, or has never successfully published metrics. Nothing is checking running images for CVEs."
+        - alert: ImageInquisitorJobFailed
+          expr: max by (namespace, job_name) (kube_job_failed{namespace="image-inquisitor", condition="true"} > 0) and on (job_name) (time() - kube_job_status_start_time{namespace="image-inquisitor"} < 86400)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "An image-inquisitor scan Job failed"
+            description: "A scan Job in the last day failed after its retries. Read the latest Job's pod logs: kubectl logs -n image-inquisitor job/<job_name> (see the job_name label)."
+        - alert: ImageInquisitorInventoryDrop
+          expr: last_over_time(image_inquisitor_images_total[26h]) < 0.8 * avg_over_time(image_inquisitor_images_total[7d])
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image inventory is well below its weekly average"
+            description: "The latest scan saw far fewer images than usual, so some may have dropped out of scanning. Check the latest Job's logs in the image-inquisitor namespace: kubectl logs -n image-inquisitor job/<latest>."
+        - alert: ImageInquisitorScanFailures
+          expr: last_over_time(image_inquisitor_scan_failures{phase="trivy"}[26h]) / ignoring(phase) last_over_time(image_inquisitor_images_total[26h]) > 0.03
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "A notable share of images failed vulnerability scanning"
+            description: "More than a few percent of images failed the trivy scan phase in the latest run. Check the latest Job's logs in the image-inquisitor namespace and the image_inquisitor_scan_failures phase label."
+        - alert: ImageInquisitorImageScanFailing
+          expr: min_over_time(image_inquisitor_scan_failed[49h]) == 1 and count_over_time(image_inquisitor_scan_failed[49h]) >= 2
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "An image has failed scanning on consecutive runs"
+            description: "At least one image has failed its scan on every run over the last two days, so it is not being checked for CVEs. The series labels name the image; see the latest Job's logs in the image-inquisitor namespace."
+        # S2/PL1: an image missing from the inventory could look "removed" and
+        # close a work order. The alert carries the namespace the missing images
+        # run in, and the relay holds only that namespace's closes. A parse
+        # failure whose namespace is unknown (non-Kubernetes source) carries no
+        # namespace label and holds every close.
+        - alert: ImageInquisitorInventoryIncomplete
+          expr: max by (phase, namespace) (last_over_time(image_inquisitor_inventory_failures[26h])) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Image inventory is incomplete"
+            description: "Some images could not be listed or parsed in the latest run, so the inventory is partial. The phase label says which step failed; read the latest Job's logs: kubectl logs -n image-inquisitor job/<latest>."
+        - alert: ImageInquisitorRegistryFailures
+          expr: last_over_time(image_inquisitor_scan_failures{phase="registry"}[26h]) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Registry lookups failed during the image scan"
+            description: "The latest run could not reach a registry for some images (phase=registry in image_inquisitor_scan_failures). Read the latest Job's logs in the image-inquisitor namespace."
       # The upgrade pilot pushes a heartbeat once per daily run. It once sat idle
       # for five days with nothing to notice, because nothing ran it. Same shape
       # as image-inquisitor above: last_over_time, because a once-a-day sample
