@@ -506,6 +506,65 @@ server:
           annotations:
             summary: "Registry lookups failed during the image scan"
             description: "The latest run could not reach a registry for some images (phase=registry in image_inquisitor_scan_failures). Read the latest Job's logs in the image-inquisitor namespace."
+      # CVE work orders: one alert per namespace whose running images have
+      # fixable critical CVEs and a newer tag available. Routed by the
+      # work_order label (see the first Alertmanager route below).
+      - name: image-upgrades
+        rules:
+        # Images in the LATEST scan. scan_failed (v0.8.0) covers every inventory image, failed ones
+        # included; image_info keeps v0.7.0 data valid so a rollback cannot empty this (RT4).
+        - record: image_inquisitor:latest_scan:image
+          expr: |
+            max by (image) (
+                tlast_over_time(image_inquisitor_scan_failed[7d])
+              or
+                tlast_over_time(image_inquisitor_image_info[7d])
+            )
+            > scalar(max(tlast_over_time(image_inquisitor_scan_timestamp_seconds[7d]))) - 3600
+
+        # Single swap point (CD1): later becomes fixed-by-target where a target scan exists, with
+        # fixable as the fallback. Alert labels stay {namespace}.
+        # Value = fixable criticals of one running image. An image is actionable when:
+        #  - its newest known-state image_info record is upgrade_state="check" (D4; "unknown", i.e. a
+        #    registry miss, does not count as a state change);
+        #  - it first entered "check" >= 5 days ago, looking back 30 d (RT1: stateless, grows until the
+        #    image changes, so an upstream release cannot reset it);
+        #  - it is in the latest scan. 7 d data windows: a failed or missed scan carries prior values (D1).
+        - record: image_inquisitor:actionable_criticals:image
+          expr: |
+            max by (image) (last_over_time(image_inquisitor_vulnerabilities_fixable{severity="critical"}[7d])) > 0
+              and on(image) (
+                  tlast_over_time(image_inquisitor_image_info{upgrade_state="check"}[7d])
+                == on(image) group_left()
+                  max by (image) (tlast_over_time(image_inquisitor_image_info{upgrade_state!="unknown"}[7d]))
+              )
+              and on(image) (
+                time() - min by (image) (tfirst_over_time(image_inquisitor_image_info{upgrade_state="check"}[30d])) >= 5 * 86400
+              )
+              and on(image) image_inquisitor:latest_scan:image
+
+        # The namespace x image join, defined once (RT10). The alert, its annotation and the later
+        # cve_intake all read this.
+        - record: image_inquisitor:actionable_criticals:namespace_image
+          expr: |
+            max by (namespace, image) (last_over_time(image_inquisitor_image_workload[7d]))
+              * on(image) group_left() image_inquisitor:actionable_criticals:image
+
+        # $value = fixable criticals in the namespace, each image counted once however many workloads
+        # use it (B4).
+        - alert: ImageUpgradeAvailable
+          expr: sum by (namespace) (image_inquisitor:actionable_criticals:namespace_image) > 0
+          for: 1h
+          labels:
+            severity: warning
+            investigate: "false"
+            work_order: cve-upgrade
+          annotations:
+            summary: "{{ $labels.namespace }}: {{ $value }} fixable critical CVEs on images behind a newer tag for 5+ days (a fix exists upstream; target tag not yet verified)"
+            images: |-
+              {{ range query (printf "sort_by_label(image_inquisitor:actionable_criticals:namespace_image{namespace=%q}, %q)" $labels.namespace "image") }}{{ .Labels.image }}={{ .Value }}
+              {{ end }}
+            runbook: "renovate-pr-triage skill"
       # The upgrade pilot pushes a heartbeat once per daily run. It once sat idle
       # for five days with nothing to notice, because nothing ran it. Same shape
       # as image-inquisitor above: last_over_time, because a once-a-day sample
@@ -765,6 +824,8 @@ alertmanager:
       webhook_configs:
       - url_file: /etc/alertmanager/ha/HA_WEBHOOK_URL
         send_resolved: true
+    # Null receiver: work orders are evaluated but delivered nowhere.
+    - name: blackhole
     route:
       receiver: slack-warning
       group_by:
@@ -774,6 +835,19 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+      # Work orders (CVE upgrade tickets). First, continue:false: never Slack,
+      # never the phone. Flipped to holmes-relay once a scheduled scan proves the
+      # alert stable.
+      - receiver: blackhole
+        matchers:
+        - work_order = cve-upgrade
+        continue: false
+        group_by:
+        - alertname
+        - namespace
+        group_wait: 1m
+        group_interval: 5m
+        repeat_interval: 24h
       # Anything labelled notify=phone also goes to the phone. First, with
       # continue:true, so criticals still reach Holmes and Slack below. Short
       # waits because this is the page for "the internet is down".
