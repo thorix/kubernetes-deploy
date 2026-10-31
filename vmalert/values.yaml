@@ -530,13 +530,15 @@ server:
         #  - it first entered "check" >= 5 days ago, looking back 30 d (RT1: stateless, grows until the
         #    image changes, so an upstream release cannot reset it);
         #  - it is in the latest scan. 7 d data windows: a failed or missed scan carries prior values (D1).
+        # The newest-record lookback is 30 d, like the first-seen gate: a long run of registry
+        # misses ("unknown") must not age the last known state out and resolve the alert.
         - record: image_inquisitor:actionable_criticals:image
           expr: |
             max by (image) (last_over_time(image_inquisitor_vulnerabilities_fixable{severity="critical"}[7d])) > 0
               and on(image) (
-                  tlast_over_time(image_inquisitor_image_info{upgrade_state="check"}[7d])
+                  tlast_over_time(image_inquisitor_image_info{upgrade_state="check"}[30d])
                 == on(image) group_left()
-                  max by (image) (tlast_over_time(image_inquisitor_image_info{upgrade_state!="unknown"}[7d]))
+                  max by (image) (tlast_over_time(image_inquisitor_image_info{upgrade_state!="unknown"}[30d]))
               )
               and on(image) (
                 time() - min by (image) (tfirst_over_time(image_inquisitor_image_info{upgrade_state="check"}[30d])) >= 5 * 86400
