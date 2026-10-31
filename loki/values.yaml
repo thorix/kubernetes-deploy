@@ -41,6 +41,16 @@ loki:
     - selector: '{namespace="victoriametrics", app="goflow2"}'
       priority: 1
       period: 14d
+    # The HealthCheck operator retries every unfinished check on each loop and
+    # logs a multi-line Python traceback per failed attempt, one Loki line per
+    # traceback line. Its volume therefore grows with its backlog of
+    # unfinished checks -- linearly, day after day, without any config change
+    # -- and under the 30d global period that growth compounds into the
+    # largest footprint in the store. 7d is ample for debugging the operator
+    # and caps what a runaway backlog can cost.
+    - selector: '{namespace="holmesgpt", app="holmes-operator"}'
+      priority: 1
+      period: 7d
 
     # Raised from the 256KB default.
     #
