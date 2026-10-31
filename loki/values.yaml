@@ -22,6 +22,26 @@ loki:
     volume_enabled: true
     retention_period: 30d
 
+    # Per-stream retention for the NetFlow collector.
+    #
+    # goflow2 writes one JSON line per flow record, so it is the largest stream in
+    # the store by a wide margin, and the most bursty: its volume tracks traffic
+    # shape, not anything we configure. One noisy host (a DNS retry storm, a scan)
+    # multiplies it for hours. Under the 30d global period that single stream
+    # dominates the volume's steady-state footprint.
+    #
+    # 14d keeps two full weeks of flows for the firewall dashboard and the
+    # NetflowMissing alert (a 15m window), and roughly halves the stream's
+    # footprint. Firewall syslog (job="firewall") is small and stays at the
+    # global 30d -- block-rule history is the part worth keeping longer.
+    #
+    # Retention is a disk-full defence only over weeks. It cannot absorb a
+    # sustained flood within a day; that is what the PVC usage alerts are for.
+    retention_stream:
+    - selector: '{namespace="victoriametrics", app="goflow2"}'
+      priority: 1
+      period: 14d
+
     # Raised from the 256KB default.
     #
     # This is the only ingest limit with no burst allowance: a line over it is
@@ -104,6 +124,13 @@ singleBinary:
       memory: 1Gi
   persistence:
     enabled: true
+    # Size of a NEW volume only. volumeClaimTemplates are immutable, so changing
+    # this on a running StatefulSet makes Argo's sync fail rather than grow the
+    # disk. To grow the live volume, patch the PVC directly (the StorageClass
+    # allows expansion) and restart the pod to finish the filesystem resize;
+    # record the live size in the environment overlay, which is the source of
+    # truth for it. Leave this value alone unless the StatefulSet is being
+    # recreated (orphan-delete), when it should be raised to the live size.
     size: 20Gi
     storageClass: longhorn
 
