@@ -499,13 +499,13 @@ server:
             summary: "Image inventory is incomplete"
             description: "Some images could not be listed or parsed in the latest run, so the inventory is partial. The phase label says which step failed; read the latest Job's logs: kubectl logs -n image-inquisitor job/<latest>."
         - alert: ImageInquisitorRegistryFailures
-          expr: last_over_time(image_inquisitor_scan_failures{phase="registry"}[26h]) > 0
+          expr: last_over_time(image_inquisitor_scan_failures{phase="registry"}[26h]) / ignoring(phase) last_over_time(image_inquisitor_images_total[26h]) > 0.2
           for: 1h
           labels:
             severity: warning
           annotations:
-            summary: "Registry lookups failed during the image scan"
-            description: "The latest run could not reach a registry for some images (phase=registry in image_inquisitor_scan_failures). Read the latest Job's logs in the image-inquisitor namespace."
+            summary: "Registry lookups failed for a large share of scanned images"
+            description: "More than 20% of the images in the latest run had a failed registry lookup (phase=registry in image_inquisitor_scan_failures over image_inquisitor_images_total). A few isolated failures are expected and do not alert; a high share points to a registry or network problem. Read the latest Job's logs in the image-inquisitor namespace."
       # CVE work orders: one alert per namespace whose running images have
       # fixable critical CVEs and a newer tag available. Routed by the
       # work_order label (see the first Alertmanager route below).
