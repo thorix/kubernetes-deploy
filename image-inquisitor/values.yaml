@@ -93,9 +93,10 @@ metricsEndpoint: ""
 excludeNamespaces: ""
 
 trivy:
-  # Persisted so the DB is not re-downloaded on every run. Trivy refreshes it
-  # when older than 6h, so a daily schedule means one refresh per run.
-  cacheSize: 5Gi
+  # Holds the Trivy vulnerability DB and the Java DB between runs. Longhorn can
+  # expand a volume but never shrink it, so this value only ever goes up; raise
+  # it in its own change, never inside a chart bump that might be reverted.
+  cacheSize: 15Gi
   storageClass: longhorn
   # Pull the DB through Harbor's ghcr proxy rather than ghcr.io directly. Harbor
   # caches it (ghcr-cache/aquasecurity/trivy-db), so repeated pulls are served
