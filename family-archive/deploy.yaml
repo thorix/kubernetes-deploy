@@ -1,0 +1,11 @@
+# family-archive: temporary spike (one source, no base values file).
+# All values live in the private config overlay with the same basename; the
+# ApplicationSet adds it with ignoreMissingValueFiles (the immich pattern).
+# Replaced by the real app's sources later.
+
+namespace: family-archive
+
+helm:
+- path: simple-service
+  valuesFiles:
+  - ../family-archive/values.spike.yaml
