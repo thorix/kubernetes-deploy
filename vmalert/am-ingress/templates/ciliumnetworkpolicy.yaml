@@ -13,6 +13,22 @@ spec:
   # Kubelet probes.
   - fromEntities:
     - host
+  # Gateway-routed UI traffic arrives as the reserved ingress identity (Cilium
+  # Gateway API class). Reads and silence management only: alert submission
+  # (POST /api/v2/alerts, /api/v1/alerts) is not allowed through here.
+  - fromEntities:
+    - ingress
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+        - method: POST
+          path: /api/v2/silences
+        - method: DELETE
+          path: /api/v2/silence/.*
   {{- range .Values.clients }}
   - fromEndpoints:
     - matchLabels:
