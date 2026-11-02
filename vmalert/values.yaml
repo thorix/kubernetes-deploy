@@ -568,20 +568,21 @@ server:
               {{ range query (printf "sort_by_label(image_inquisitor:actionable_criticals:namespace_image{namespace=%q}, %q)" $labels.namespace "image") }}{{ .Labels.image }}={{ .Value }}
               {{ end }}
             runbook: "renovate-pr-triage skill"
-      # The upgrade pilot pushes a heartbeat once per daily run. It once sat idle
+      # The upgrade pilot pushes a heartbeat on every 15-minute tick. It once sat idle
       # for five days with nothing to notice, because nothing ran it. Same shape
-      # as image-inquisitor above: last_over_time, because a once-a-day sample
-      # is stale to an instant query between runs.
+      # as image-inquisitor above: last_over_time, because a sample pushed every
+      # 15 minutes is stale to an instant query between ticks. State gauges are
+      # wrapped in a 20m window for the same reason.
       - name: upgrade-pilot
         rules:
         - alert: UpgradePilotStale
-          expr: (time() - last_over_time(upgrade_pilot_last_run_timestamp_seconds[7d])) > 86400 * 2
-          for: 30m
+          expr: (time() - last_over_time(upgrade_pilot_last_run_timestamp_seconds[7d])) > 2700
+          for: 15m
           labels:
             severity: warning
           annotations:
             summary: "Upgrade pilot has not run in {{ $value | humanizeDuration }}"
-            description: "The daily upgrade-pilot run last reported {{ $value | humanizeDuration }} ago, so new Renovate PRs are not being evaluated or logged for review. Two days allows one missed run. Check: kubectl get cronjob,job -n upgrade-pilot"
+            description: "15-minute tick, 3 missed ticks: the upgrade-pilot run last reported {{ $value | humanizeDuration }} ago, so new Renovate PRs are not being evaluated or logged for review. Check: kubectl get cronjob,job -n upgrade-pilot"
         - alert: UpgradePilotMissing
           expr: absent(last_over_time(upgrade_pilot_last_run_timestamp_seconds[7d]))
           for: 1h
@@ -590,6 +591,45 @@ server:
           annotations:
             summary: "Upgrade pilot has stopped entirely"
             description: "No upgrade-pilot heartbeat in seven days: the CronJob is deleted, suspended, or has never completed a run that reached VictoriaMetrics."
+        - alert: UpgradePilotPaused
+          expr: last_over_time(upgrade_pilot_paused[20m]) == 1
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot is paused"
+            description: "The pilot reports paused=1, so ticks do no work until the pause is lifted."
+        - alert: UpgradePilotHalted
+          expr: time() - last_over_time(upgrade_pilot_last_halt_timestamp_seconds[20m]) < 86400
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Upgrade pilot halted within the last day"
+            description: "The pilot recorded a halt {{ $value | humanizeDuration }} ago. It stays quiet until a human clears the halt."
+        - alert: UpgradePilotAdvisorBudget
+          expr: last_over_time(upgrade_pilot_advisor_spend_usd_month[20m]) >= last_over_time(upgrade_pilot_advisor_cap_usd[20m])
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot advisor spend has reached the monthly cap"
+            description: "Advisor spend this month is at or above the configured cap, so advisor calls stop until the month rolls over or the cap is raised."
+        - alert: UpgradePilotVerifyAttention
+          expr: last_over_time(upgrade_pilot_verify_attention[20m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot has {{ $value }} item(s) needing verification attention"
+            description: "One or more post-merge verifications need a human look. See the pilot decision log."
+        - alert: UpgradePilotWatchdog
+          expr: vector(1)
+          labels:
+            severity: none
+          annotations:
+            summary: "Evaluator heartbeat for upgrade-pilot S4; always firing by design"
+            description: "Always firing. The pilot checks that this alert is live in Alertmanager to know the evaluator path works. Routed to the null receiver."
       - name: holmesgpt
         rules:
         - alert: HolmesScheduledCheckStale
@@ -838,6 +878,11 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+      # Evaluator heartbeat: always firing by design, delivered nowhere.
+      - receiver: blackhole
+        matchers:
+        - alertname = UpgradePilotWatchdog
+        continue: false
       # Work orders (CVE upgrade tickets). First, continue:false: never Slack,
       # never the phone. The relay files one ticket per namespace and skips
       # Holmes. To pause delivery, point this back at blackhole.

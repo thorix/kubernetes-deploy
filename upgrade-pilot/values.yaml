@@ -1,21 +1,22 @@
-# upgrade-pilot CronJob -- see deploy.yaml for what this is and is not.
+# upgrade-pilot CronJob (runs every 15 minutes) -- see deploy.yaml for what this is and is not.
 workloadType: CronJob
 
 image:
   repository: harbor.lan/library/upgrade-pilot   # real registry host lives in the config overlay
-  tag: "v0.1.1"
+  tag: "v0.2.0"
   pullPolicy: IfNotPresent
 
 cronjob:
-  schedule: "0 13 * * *"   # 13:00 UTC = 07:00 Mountain: new decisions are waiting in the morning
-  concurrencyPolicy: Forbid
-  # No retries. A run that fails should show as a failed Job -- the next day's
-  # run re-clones from scratch anyway, and a retry would only push the failure
+  schedule: "*/15 * * * *"   # every 15 minutes
+  concurrencyPolicy: Forbid   # explicit: a slow tick must never overlap the next
+  # No retries. A run that fails should show as a failed Job -- the next tick
+  # re-clones from scratch anyway, and a retry would only push the failure
   # further from anyone's view.
   restartPolicy: Never
   backoffLimit: 0
-  # A run that cannot start or finish within an hour fails visibly instead of blocking every later run under Forbid.
-  activeDeadlineSeconds: 3600
+  # The image's run script stops the tick at 780 s; this Job deadline (840 s) is the backstop,
+  # so a hung run fails visibly instead of blocking every later tick under Forbid.
+  activeDeadlineSeconds: 840
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
 
@@ -30,8 +31,16 @@ env:
   # Heartbeat target. The import endpoint takes Prometheus exposition text.
   - name: VM_URL
     value: "http://victoriametrics-victoria-metrics-single-server.victoriametrics.svc.cluster.local:8428"
+  # Alertmanager and vmalert read APIs, used by the tick for alert state.
+  - name: AM_URL
+    value: "http://vmalert-victoria-metrics-alert-alertmanager.victoriametrics.svc:9093"
+  - name: VMALERT_URL
+    value: "http://vmalert-victoria-metrics-alert-server.victoriametrics.svc:8880"
+  # Dry-run until switch-on: the tick evaluates and logs but changes nothing.
+  - name: PILOT_TICK_MODE
+    value: "--dry-run"
   - name: GIT_AUTHOR_NAME
-    value: "upgrade-pilot (scheduled)"
+    value: "upgrade-pilot (tick)"
   - name: GIT_AUTHOR_EMAIL
     value: "8203031+thorix@users.noreply.github.com"
   # Two fine-grained tokens, both synced from Vault (below), so that nothing in
