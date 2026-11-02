@@ -629,7 +629,7 @@ server:
             severity: none
           annotations:
             summary: "Evaluator heartbeat for upgrade-pilot S4; always firing by design"
-            description: "Always firing. The pilot checks that this alert is live in Alertmanager to know the evaluator path works. Routed to the null receiver."
+            description: "Always firing. The pilot checks the age of the newest firing ALERTS sample for this rule in VictoriaMetrics to know the evaluator path works. Routed to the null receiver."
       - name: holmesgpt
         rules:
         - alert: HolmesScheduledCheckStale
