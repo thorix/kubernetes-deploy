@@ -3,14 +3,11 @@
 
 Regression origin: task titles were `alertname + namespace`. Blackbox/probe
 alerts carry no namespace, so EVERY EndpointDown collapsed into a single ticket
-titled "[alert] EndpointDown". On 2026-09-22 that one ticket stood for two
-unrelated probe targets -- one a false alarm from probing a path the service
-answers 415 to, the other genuinely unreachable for 7+ days -- while the Holmes
-analysis attached to it discussed only the first. Fixing one could never close it.
+titled "[alert] EndpointDown" that stood for several unrelated probe targets,
+with an analysis that discussed only one. Fixing one could never close it.
 
-Fixtures use placeholder values (RFC 5737 192.0.2.0/24 and a .lan host), not
-the real targets. The pre-commit hygiene hook rejected an earlier
-draft of this file for using the real ones, which is that guard working.
+Fixtures use placeholder values (RFC 5737 192.0.2.0/24 and example.com), not
+real targets.
 """
 import importlib.util
 import os
@@ -21,8 +18,8 @@ _spec = importlib.util.spec_from_file_location(
 relay = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(relay)
 
-PROBE_A = "https://probe-a.lan/health"   # stands in for an HTTP probe target
-PROBE_B = "192.0.2.10"                            # stands in for an ICMP probe target
+PROBE_A = "https://probe-a.example.com/health"   # stands in for an HTTP probe target
+PROBE_B = "192.0.2.10"   # stands in for an ICMP probe target
 
 
 def alert(**labels):
