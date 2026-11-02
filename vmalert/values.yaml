@@ -623,6 +623,31 @@ server:
           annotations:
             summary: "Upgrade pilot has {{ $value }} item(s) needing verification attention"
             description: "One or more post-merge verifications need a human look. See the pilot decision log."
+        # A failed pilot Job lingers until failedJobsHistoryLimit (3) prunes it, so a bare
+        # failed > 0 would stay red for hours. Fires only while the failed Job started
+        # within 24h and is newer than the newest Job that succeeded (no success on
+        # record counts as 0). The next successful tick therefore resolves it.
+        - alert: UpgradePilotJobFailed
+          expr: |
+            (sum by (namespace, job_name) (kube_job_status_failed{namespace="upgrade-pilot"}) > 0)
+            and on (namespace, job_name)
+            ((time() - kube_job_status_start_time{namespace="upgrade-pilot"}) < 86400)
+            and on (namespace, job_name)
+            (
+              kube_job_status_start_time{namespace="upgrade-pilot"}
+              > on (namespace) group_left ()
+              (
+                max by (namespace) (kube_job_status_start_time{namespace="upgrade-pilot"} and on (namespace, job_name) (kube_job_status_succeeded{namespace="upgrade-pilot"} > 0))
+                or on (namespace)
+                (0 * max by (namespace) (kube_job_status_start_time{namespace="upgrade-pilot"}))
+              )
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Upgrade pilot Job {{ $labels.job_name }} failed"
+            description: "A pilot Job failed (for example DeadlineExceeded) and no later Job has succeeded. Resolves on the next successful tick or when the failed Job is pruned. Check: kubectl describe job {{ $labels.job_name }} -n upgrade-pilot"
         - alert: UpgradePilotWatchdog
           expr: vector(1)
           labels:
