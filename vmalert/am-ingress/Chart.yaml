@@ -1,0 +1,5 @@
+apiVersion: v2
+name: vmalert-am-ingress
+description: Ingress policy that limits which workloads may reach Alertmanager
+type: application
+version: 0.1.0

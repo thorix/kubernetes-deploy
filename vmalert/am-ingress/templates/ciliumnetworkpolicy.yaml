@@ -1,0 +1,56 @@
+# Only narrows who may post alerts to Alertmanager. It does not change routing,
+# receivers or silences. Alert submission is limited to the listed clients.
+# The gateway (reads and silence management) and the API server (reads via the
+# service proxy) get separate L7 rules; any L7 rule on 9093 sends all traffic to
+# that port through the Cilium proxy.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vmalert-alertmanager-ingress
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: alertmanager
+      app.kubernetes.io/instance: vmalert
+  ingress:
+  # Kubelet probes.
+  - fromEntities:
+    - host
+  # Gateway-routed UI traffic arrives as the reserved ingress identity (Cilium
+  # Gateway API class). Reads and silence management only: alert submission
+  # (POST /api/v2/alerts, /api/v1/alerts) is not allowed through here.
+  - fromEntities:
+    - ingress
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+        - method: POST
+          path: /api/v2/silences
+        - method: DELETE
+          path: /api/v2/silence/.*
+  # API server service proxy (kubectl get --raw): GET only.
+  - fromEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+  {{- range .Values.clients }}
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: {{ .namespace | quote }}
+        {{- range $k, $v := .matchLabels }}
+        k8s:{{ $k }}: {{ $v | quote }}
+        {{- end }}
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+  {{- end }}
