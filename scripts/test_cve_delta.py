@@ -62,9 +62,14 @@ class FakeRunner:
         self.ancestor = ancestor
         self.calls = []
         self.outputs = []
+        self.cwds = []
+        self.by_index = {}              # "repo@index digest" -> original ref
+        self.moved = {}                 # ref -> ref its tag moves to after one read
 
-    def __call__(self, argv):
+    def __call__(self, argv, cwd=None):
         self.calls.append(list(argv))
+        if os.path.basename(argv[0]) == "trivy":
+            self.cwds.append(cwd)
         tool = os.path.basename(argv[0])
         if tool == "git":
             return self.git(argv[1:])
@@ -106,7 +111,18 @@ class FakeRunner:
         ref = a[-1]
         if ref in self.crane_errors:
             return cd.Result(1, "", self.crane_errors[ref])
-        return cd.Result(0, fake_digest(ref, "--platform" in a) + "\n", "")
+        if "--platform" in a:
+            # Platform reads go through the index digest; a bare tag here would
+            # mean the index and platform digests can come from different images.
+            if ref not in self.by_index:
+                raise AssertionError("platform read by tag %r" % ref)
+            return cd.Result(0, fake_digest(self.by_index[ref], True) + "\n", "")
+        index = fake_digest(ref)
+        self.by_index[cd.parse_ref(ref)[0] + "@" + index] = ref
+        if ref in self.moved:
+            # The tag now points elsewhere for any later read by tag.
+            self.crane_errors[ref] = "unexpected second read by tag"
+        return cd.Result(0, index + "\n", "")
 
     def trivy(self, a):
         self.assert_eq(a[0], "image")
@@ -252,10 +268,44 @@ class TestPairs(unittest.TestCase):
         out, code, artifact = ci(runner=FakeRunner(base, head, {}))
         self.assertEqual((out, code, artifact), ("cve-delta: no image change\n", 0, None))
 
+    def test_dropped_image_declaration_fails_closed(self):
+        for head_value in ("image: []\n", "image: {}\n", "other: 1\n"):
+            with self.subTest(head=head_value):
+                runner = FakeRunner({"app/values.yaml": "image: registry.example.lan/team/app:1.0.0\n"},
+                                    {"app/values.yaml": head_value}, {})
+                out, code, artifact = ci(runner=runner)
+                self.assertEqual((out, code, artifact),
+                                 ("cve-delta: scan failed (image declaration removed)\n", 1, None))
+                self.assertFalse(any(c[0] in ("crane", "trivy") for c in runner.calls))
+
+    def test_deleted_or_renamed_values_file_fails_closed(self):
+        v1 = "image: registry.example.lan/team/app:1.0.0\n"
+        heads = {
+            "deleted": {},
+            "renamed to excluded dir": {"scripts/values.yaml": v1},
+            "renamed to other extension": {"app/values.yaml.bak": v1},
+        }
+        for name, head in heads.items():
+            with self.subTest(name=name):
+                runner = FakeRunner({"app/values.yaml": v1}, head, {})
+                out, code, artifact = ci(runner=runner)
+                self.assertEqual((out, code, artifact),
+                                 ("cve-delta: scan failed (image declaration removed)\n", 1, None))
+                self.assertFalse(any(c[0] in ("crane", "trivy") for c in runner.calls))
+
+    def test_deleted_file_without_images_passes(self):
+        runner = FakeRunner({"app/configmap.yaml": "data:\n  k: v\n"}, {}, {})
+        self.assertEqual(ci(runner=runner)[:2], ("cve-delta: no image change\n", 0))
+
+    def test_deleted_unparseable_file_fails_closed(self):
+        runner = FakeRunner({"app/values.yaml": "image: [unclosed\n"}, {}, {})
+        self.assertEqual(ci(runner=runner)[:2], ("cve-delta: scan failed\n", 1))
+
     def test_pair_changes_added_and_removed(self):
         got = cd.pair_changes({"a": "x/a:1", "gone": "x/g:1"},
                               {"a": "x/a:2", "new": "x/n:1"})
-        self.assertEqual(got, [("a", "x/a:1", "x/a:2"), ("new", None, "x/n:1")])
+        self.assertEqual(got, [("a", "x/a:1", "x/a:2"), ("gone", "x/g:1", cd.REMOVED),
+                               ("new", None, "x/n:1")])
 
 
 class TestIntroduced(unittest.TestCase):
@@ -300,10 +350,56 @@ class TestIntroduced(unittest.TestCase):
         self.assertEqual(sum("--download-db-only" in c for c in trivy), 1)
         for c in trivy[1:]:
             self.assertEqual(c[:9], ["trivy", "image", "--skip-db-update", "--severity",
-                                     "CRITICAL", "--format", "json", "--quiet", "--output"])
+                                     "CRITICAL", "--format", "json", "--quiet", "--ignorefile"])
+            self.assertEqual(c[10], "--output")
             self.assertRegex(c[-1], r"^registry\.example\.lan/team/app@sha256:[0-9a-f]{64}$")
         self.assertIn(["crane", "digest", NEW_REF], runner.calls)
-        self.assertIn(["crane", "digest", "--platform", "linux/amd64", NEW_REF], runner.calls)
+        self.assertIn(["crane", "digest", "--platform", "linux/amd64", APP + "@" + fake_digest(NEW_REF)],
+                      runner.calls)
+
+    def test_platform_digest_read_through_index_digest(self):
+        runner = runner_for("clean")
+        runner.moved = {NEW_REF: True, OLD_REF: True}
+        out, code, artifact = ci(runner=runner)
+        self.assertEqual((out, code), ("cve-delta: no new critical CVEs\n", 0))
+        self.assertEqual(sum(c == ["crane", "digest", NEW_REF] for c in runner.calls), 1)
+        self.assertEqual(artifact[0]["index_digest"], fake_digest(NEW_REF))
+        self.assertEqual(artifact[0]["platform_digest"], fake_digest(NEW_REF, True))
+
+    def test_trivy_runs_isolated_from_checkout(self):
+        runner = runner_for("clean")
+        ci(runner=runner)
+        scans = [c for c in runner.calls if c[0] == "trivy"]
+        self.assertTrue(runner.cwds and all(runner.cwds))
+        self.assertTrue(all(cwd.startswith(tempfile.gettempdir()) for cwd in runner.cwds))
+        for c in scans:
+            if "--output" in c:
+                ignore = c[c.index("--ignorefile") + 1]
+                self.assertEqual(os.path.dirname(ignore), os.path.dirname(c[c.index("--output") + 1]))
+                self.assertTrue(ignore.endswith("empty.trivyignore"))
+
+    def test_unresolvable_registry_names_the_cause(self):
+        err = 'Get "https://registry.example.lan/v2/": dial tcp: lookup registry.example.lan: no such host'
+        for kw in (dict(crane_errors={NEW_REF: err}), dict(crane_errors={OLD_REF: err})):
+            with self.subTest(kw=kw):
+                out, code, artifact = ci(runner=runner_for("clean", **kw))
+                self.assertEqual((out, code, artifact),
+                                 ("cve-delta: scan failed (unresolvable registry)\n", 1, None))
+                self.assertTrue(out.startswith("cve-delta: scan failed"))
+                self.assertNotIn("example.lan", out)
+
+    def test_pair_unresolvable_registry_is_not_json(self):
+        err = "dial tcp: lookup registry.example.lan: server misbehaving"
+        buf = io.StringIO()
+        code = cd.main(["pair", "--old", OLD_REF, "--new", NEW_REF, "--verbose"],
+                       runner=runner_for("clean", crane_errors={NEW_REF: err}), out=buf)
+        self.assertEqual((buf.getvalue(), code), ("cve-delta: scan failed (unresolvable registry)\n", 1))
+
+    def test_unknown_cause_is_never_printed(self):
+        self.assertIsNone(cd.ScanError("anything else").cause)
+        buf = io.StringIO()
+        self.assertEqual(cd._emit(buf, cd.FAILED, "free text"), 1)
+        self.assertEqual(buf.getvalue(), "cve-delta: scan failed\n")
 
 
 class TestRevertExemption(unittest.TestCase):

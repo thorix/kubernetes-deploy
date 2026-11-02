@@ -791,10 +791,6 @@ class TestReconcile(RelayCase):
         self.assertEqual(relay._pending_close, {})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestWorkOrderValidation(RelayCase):
     def _rejects(self, a, reason):
         before = relay._rejected.get(reason, 0)
@@ -862,3 +858,7 @@ class TestWorkOrderValidation(RelayCase):
         self.assertIn('relay_work_order_rejected_total{reason="namespace"} 2', text)
         for r in ("alertname", "images", "too_many_images"):
             self.assertIn('relay_work_order_rejected_total{reason="%s"} 0' % r, text)
+
+
+if __name__ == "__main__":
+    unittest.main()
