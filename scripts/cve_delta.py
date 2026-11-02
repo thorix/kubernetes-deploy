@@ -12,8 +12,9 @@ parentheses, e.g. `cve-delta: scan failed (unresolvable registry)`. Findings
 are never printed, summarised or uploaded; the digest artifact holds YAML
 paths, refs and digests only.
 
-An image declaration that a changed file drops (present at base, absent at
-head) fails closed like an unparseable one.
+An image declaration that the PR drops fails closed with
+`scan failed (image declaration removed)`: a key gone from a changed file, or
+a file that declared images and is deleted or renamed out of scope.
 
 Usage:
   cve_delta.py ci      # GitHub Actions; reads BASE_SHA, HEAD_SHA, PR_AUTHOR,
@@ -42,7 +43,8 @@ FAIL = (INTRODUCED, FAILED)
 # Causes that may follow FAILED in parentheses. The line still starts with
 # `cve-delta: scan failed`, which is what callers match on.
 UNRESOLVABLE = "unresolvable registry"
-CAUSES = (UNRESOLVABLE,)
+DECLARATION_REMOVED = "image declaration removed"
+CAUSES = (UNRESOLVABLE, DECLARATION_REMOVED)
 # crane stderr when the registry host name does not resolve (for example a
 # placeholder registry host).
 UNRESOLVABLE_MARKERS = ("no such host", "server misbehaving")
@@ -51,6 +53,9 @@ PLATFORM = "linux/amd64"
 # Marks an image value that is present but cannot be read as a reference. It
 # only matters when it changes: a changed unparseable image fails closed.
 UNPARSEABLE = "\0unparseable"
+# Marks an image declaration present at base and gone at head.
+REMOVED = "\0removed"
+SENTINELS = (UNPARSEABLE, REMOVED)
 
 EXCLUDED_TOP = ("scripts", ".github", "simple-service", "chart-template")
 # `_template` is a scaffold; `templates` holds Helm templates, which are not
@@ -209,12 +214,12 @@ def load_images(text):
 def pair_changes(base, head):
     """[(path, old ref or None, new ref)] for every image that differs at head.
 
-    A declaration present at base and gone at head pairs with UNPARSEABLE, so
-    it fails closed: every image the change selects is one that was scanned.
+    A declaration present at base and gone at head pairs with REMOVED, so it
+    fails closed: every image the change selects is one that was scanned.
     """
     pairs = [(path, base.get(path), head[path])
              for path in sorted(head) if base.get(path) != head[path]]
-    pairs += [(path, base[path], UNPARSEABLE) for path in sorted(base) if path not in head]
+    pairs += [(path, base[path], REMOVED) for path in sorted(base) if path not in head]
     return sorted(pairs)
 
 
@@ -246,7 +251,7 @@ def revert_exempt(author, author_type, head_ref, app_slug, is_ancestor, pr_pairs
 
 def verdict(pairs, *, unparseable=False, exempt=False, introduced_keys=None):
     """(passed, description). `introduced_keys` None means the scan did not finish."""
-    if unparseable or any(UNPARSEABLE in (old, new) for _, old, new in pairs):
+    if unparseable or any(m in (old, new) for _, old, new in pairs for m in SENTINELS):
         return False, FAILED
     if not pairs:
         return True, NO_CHANGE
@@ -299,10 +304,10 @@ def changed_pairs(runner, old_sha, new_sha):
     pairs, unparseable = [], False
     for path in candidate_files(list(status_of)):
         status = status_of[path][:1]
-        if status == "D":
-            continue
         try:
-            head = _file_images(runner, new_sha, path)
+            # A deleted file (or one renamed out of scope: --no-renames gives a
+            # D here and an A that candidate_files drops) has no images at head.
+            head = {} if status == "D" else _file_images(runner, new_sha, path)
             base = {} if status == "A" else _file_images(runner, old_sha, path)
         except Unparseable:
             unparseable = True
@@ -446,6 +451,8 @@ def run_ci(env, runner=default_runner, out=sys.stdout):
         pairs, unparseable = changed_pairs(runner, merge_base, head)
     except (KeyError, ScanError):
         return _emit(out, FAILED)
+    if not unparseable and any(REMOVED in pair for pair in pairs):
+        return _emit(out, FAILED, DECLARATION_REMOVED)
     if unparseable or not pairs or any(UNPARSEABLE in pair for pair in pairs):
         return _emit(out, verdict(pairs, unparseable=unparseable)[1])
     if _exemption(env, runner, pairs):

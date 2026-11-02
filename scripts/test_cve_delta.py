@@ -274,13 +274,37 @@ class TestPairs(unittest.TestCase):
                 runner = FakeRunner({"app/values.yaml": "image: registry.example.lan/team/app:1.0.0\n"},
                                     {"app/values.yaml": head_value}, {})
                 out, code, artifact = ci(runner=runner)
-                self.assertEqual((out, code, artifact), ("cve-delta: scan failed\n", 1, None))
+                self.assertEqual((out, code, artifact),
+                                 ("cve-delta: scan failed (image declaration removed)\n", 1, None))
                 self.assertFalse(any(c[0] in ("crane", "trivy") for c in runner.calls))
+
+    def test_deleted_or_renamed_values_file_fails_closed(self):
+        v1 = "image: registry.example.lan/team/app:1.0.0\n"
+        heads = {
+            "deleted": {},
+            "renamed to excluded dir": {"scripts/values.yaml": v1},
+            "renamed to other extension": {"app/values.yaml.bak": v1},
+        }
+        for name, head in heads.items():
+            with self.subTest(name=name):
+                runner = FakeRunner({"app/values.yaml": v1}, head, {})
+                out, code, artifact = ci(runner=runner)
+                self.assertEqual((out, code, artifact),
+                                 ("cve-delta: scan failed (image declaration removed)\n", 1, None))
+                self.assertFalse(any(c[0] in ("crane", "trivy") for c in runner.calls))
+
+    def test_deleted_file_without_images_passes(self):
+        runner = FakeRunner({"app/configmap.yaml": "data:\n  k: v\n"}, {}, {})
+        self.assertEqual(ci(runner=runner)[:2], ("cve-delta: no image change\n", 0))
+
+    def test_deleted_unparseable_file_fails_closed(self):
+        runner = FakeRunner({"app/values.yaml": "image: [unclosed\n"}, {}, {})
+        self.assertEqual(ci(runner=runner)[:2], ("cve-delta: scan failed\n", 1))
 
     def test_pair_changes_added_and_removed(self):
         got = cd.pair_changes({"a": "x/a:1", "gone": "x/g:1"},
                               {"a": "x/a:2", "new": "x/n:1"})
-        self.assertEqual(got, [("a", "x/a:1", "x/a:2"), ("gone", "x/g:1", cd.UNPARSEABLE),
+        self.assertEqual(got, [("a", "x/a:1", "x/a:2"), ("gone", "x/g:1", cd.REMOVED),
                                ("new", None, "x/n:1")])
 
 
