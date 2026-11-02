@@ -213,10 +213,10 @@ configMap:
 
           namespace is the right scope for a workload alert and stays stable when a
           pod is replaced. But blackbox/probe alerts carry NO namespace, so scoping on
-          it alone collapsed every EndpointDown into one ticket: on 2026-09-22 a single
-          "[alert] EndpointDown" stood for both llama.thorix.io and 100.98.214.1, with
-          an analysis that discussed only the first, and fixing one could never close
-          it. Fall back to the target's own identity so each gets its own ticket.
+          it alone collapses every EndpointDown into one ticket, so one "[alert]
+          EndpointDown" would stand for several unrelated targets, carry an analysis of
+          only one of them, and could never be closed by fixing just one. Fall back to
+          the target's own identity so each gets its own ticket.
 
           Order matters -- namespace first, so a workload alert that also carries an
           instance label is not retitled every time the pod IP changes.
