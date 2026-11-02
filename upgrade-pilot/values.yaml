@@ -3,7 +3,7 @@ workloadType: CronJob
 
 image:
   repository: harbor.lan/library/upgrade-pilot   # real registry host lives in the config overlay
-  tag: "v0.2.0"
+  tag: "v0.2.1"
   pullPolicy: IfNotPresent
 
 cronjob:
