@@ -1,0 +1,5 @@
+# Synthetic fixture for cve_delta tests.
+image:
+  repository: registry.example.lan/team/app
+  tag: "1.0.1"
+replicaCount: 1
