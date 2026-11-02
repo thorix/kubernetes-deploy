@@ -85,6 +85,7 @@ HOLD_ALERTNAME = "ImageInquisitorInventoryIncomplete"
 
 MAX_QUEUE = int(os.environ.get("MAX_QUEUE", "20"))
 PORT = int(os.environ.get("PORT", "8080"))
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "9108"))
 
 _work: "queue.Queue[dict]" = queue.Queue(maxsize=MAX_QUEUE)
 _seen: dict[str, float] = {}          # dedup key -> last-enqueued epoch
@@ -95,6 +96,10 @@ _seen_lock = threading.Lock()
 # Guarded by _pending_lock.
 _pending_close: dict[str, tuple[float, str, str, str]] = {}
 _pending_lock = threading.Lock()
+# Work-order alerts dropped by _work_order_verdict, by reason. Guarded by _rejected_lock.
+_rejected: dict[str, int] = {}
+_rejected_lock = threading.Lock()
+REJECT_REASONS = ("alertname", "namespace", "images", "too_many_images")
 _wo_queue: "queue.Queue[tuple]" = queue.Queue(maxsize=200)
 _wo_close_enqueued: set[str] = set()   # keys with a ("close", key) in flight
 
@@ -451,9 +456,51 @@ def _enqueue(alert: dict) -> str:
 MARKER_RE = re.compile(r"(?:<!-- |<p>)relay:wo h=([0-9a-f]{12})(?: -->|</p>)")
 
 
-def _is_work_order(alert: dict) -> bool:
+_NS_RE = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+_IMAGE_LINE_RE = re.compile(r"^[A-Za-z0-9./:@_-]{1,255}=[0-9]{1,6}$")
+MAX_WO_IMAGES = 50
+
+
+def _work_order_verdict(alert: dict) -> str:
+    """"work_order", "not_work_order" or "reject:<reason>".
+
+    An alert carrying a work_order label or investigate="false" is never
+    "not_work_order": it either passes every check or is rejected, so a forged
+    or malformed one cannot fall through to the Holmes path.
+    """
     labels = alert.get("labels", {}) or {}
-    return labels.get("investigate") == "false" and bool(labels.get("work_order"))
+    if labels.get("investigate") != "false" and not labels.get("work_order"):
+        return "not_work_order"
+    if (labels.get("alertname") not in WORK_ORDER_ALERTNAMES
+            or labels.get("investigate") != "false" or not labels.get("work_order")):
+        return "reject:alertname"
+    if not _NS_RE.match(str(labels.get("namespace") or "")):
+        return "reject:namespace"
+    lines = _images(alert)
+    if len(lines) > MAX_WO_IMAGES:
+        return "reject:too_many_images"
+    if not all(_IMAGE_LINE_RE.match(ln) for ln in lines):
+        return "reject:images"
+    return "work_order"
+
+
+def _is_work_order(alert: dict) -> bool:
+    return _work_order_verdict(alert) == "work_order"
+
+
+def _count_rejected(reason: str) -> None:
+    with _rejected_lock:
+        _rejected[reason] = _rejected.get(reason, 0) + 1
+
+
+def _metrics_text() -> str:
+    out = ["# HELP relay_work_order_rejected_total Work-order alerts dropped by input checks.",
+           "# TYPE relay_work_order_rejected_total counter"]
+    with _rejected_lock:
+        snap = dict(_rejected)
+    for r in REJECT_REASONS:
+        out.append('relay_work_order_rejected_total{reason="%s"} %d' % (r, snap.get(r, 0)))
+    return "\n".join(out) + "\n"
 
 
 def _images(alert: dict) -> list[str]:
@@ -652,10 +699,15 @@ def _reconcile_work_orders() -> int:
 
 def _handle_alerts(data: dict) -> dict:
     counts = {"queued": 0, "deduped": 0, "queue-full": 0, "resolved": 0, "skipped": 0, "work-order": 0,
-              "work-order-queue-full": 0}
+              "work-order-queue-full": 0, "work-order-rejected": 0}
     for alert in data.get("alerts", []) or []:
         status = alert.get("status")
-        if _is_work_order(alert):
+        verdict = _work_order_verdict(alert)
+        if verdict.startswith("reject:"):
+            _count_rejected(verdict.split(":", 1)[1])
+            counts["work-order-rejected"] += 1
+            continue
+        if verdict == "work_order":
             if status == "firing":
                 _cancel_pending_close(alert)
                 try:
@@ -721,7 +773,26 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps(counts))
 
 
+class MetricsHandler(BaseHTTPRequestHandler):
+    def log_message(self, *_a):
+        return
+
+    def do_GET(self):
+        if self.path != "/metrics":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = _metrics_text().encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def main() -> None:
+    threading.Thread(target=ThreadingHTTPServer(("0.0.0.0", METRICS_PORT), MetricsHandler).serve_forever,
+                     daemon=True).start()
     threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_reaper, daemon=True).start()
     threading.Thread(target=_wo_worker, daemon=True).start()

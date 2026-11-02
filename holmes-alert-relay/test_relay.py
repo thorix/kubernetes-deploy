@@ -113,7 +113,7 @@ NS_A, NS_B = "ns-a", "ns-b"
 WO_TITLE = "[alert] ImageUpgradeAvailable — " + NS_A
 
 
-def wo_alert(ns=NS_A, status="firing", images="img-one:1\nimg-two:2", summary="2 images", **extra):
+def wo_alert(ns=NS_A, status="firing", images="img-one:1=3\nimg-two:2=1", summary="2 images", **extra):
     labels = {"alertname": "ImageUpgradeAvailable", "namespace": ns, "severity": "warning",
               "investigate": "false", "work_order": "cve-upgrade"}
     labels.update(extra)
@@ -209,6 +209,8 @@ class RelayCase(unittest.TestCase):
         relay._pending_close.clear()
         relay._wo_close_enqueued.clear()
         relay._seen.clear()
+        with relay._rejected_lock:
+            relay._rejected.clear()
         for qq in (relay._wo_queue, relay._work):
             while not qq.empty():
                 qq.get_nowait()
@@ -283,7 +285,8 @@ class TestRouting(RelayCase):
         a = wo_alert()
         del a["labels"]["work_order"]
         self.assertFalse(relay._is_work_order(a))
-        self.assertEqual(relay._handle_alerts({"alerts": [a]})["skipped"], 1)
+        # investigate="false" is never "not a work order": it is rejected.
+        self.assertEqual(relay._handle_alerts({"alerts": [a]})["work-order-rejected"], 1)
 
     def test_enqueue_dedup_uses_ident_key(self):
         mk = lambda inst: {"status": "firing", "labels": {"alertname": "EndpointDown", "severity": "critical", "instance": inst}}
@@ -366,9 +369,9 @@ class TestUpsert(RelayCase):
 
     def test_changed_images_one_comment(self):
         self.fire(wo_alert())
-        self.fire(wo_alert(images="img-one:1\nimg-three:3"))
+        self.fire(wo_alert(images="img-one:1=3\nimg-three:3=1"))
         self.assertEqual(self.vk.n_comments(), 1)
-        self.fire(wo_alert(images="img-one:1\nimg-three:3"))
+        self.fire(wo_alert(images="img-one:1=3\nimg-three:3=1"))
         self.assertEqual(self.vk.n_comments(), 1)
 
     def test_restart_keeps_hash(self):
@@ -719,7 +722,7 @@ class TestPaging(RelayCase):
         tid = self.vk.tasks[0]["id"]
         stale = "<!-- relay:wo h=aaaaaaaaaaaa -->"
         self.vk.comments[tid] = [{"comment": "<p>old</p>" + stale} for _ in range(60)]
-        changed = wo_alert(images="img-one:1\nimg-three:3")
+        changed = wo_alert(images="img-one:1=3\nimg-three:3=1")
         self.fire(changed)            # marker differs from the stale one: one comment
         self.assertEqual(self.vk.n_comments(), 61)
         self.fire(changed)            # its marker is on page 2: no second comment
@@ -790,3 +793,72 @@ class TestReconcile(RelayCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkOrderValidation(RelayCase):
+    def _rejects(self, a, reason):
+        before = relay._rejected.get(reason, 0)
+        counts = relay._handle_alerts({"alerts": [a]})
+        self.assertEqual(counts["work-order-rejected"], 1)
+        self.assertEqual(relay._rejected.get(reason, 0), before + 1)
+        self.assertTrue(relay._wo_queue.empty())
+        self.assertTrue(relay._work.empty())
+        self.assertEqual(len(relay._pending_close), 0)
+
+    def test_forged_alertname_is_dropped_and_counted(self):
+        a = wo_alert(alertname="SomethingElse")
+        counts = relay._handle_alerts({"alerts": [a]})
+        self.assertEqual(counts["work-order-rejected"], 1)
+        self.assertEqual(relay._rejected["alertname"], 1)
+        self.assertTrue(relay._wo_queue.empty())
+
+    def test_forged_alertname_with_work_order_label_never_reaches_holmes(self):
+        # Regression guard: passes before the change too (work orders never reach Holmes).
+        a = wo_alert(alertname="SomethingElse", severity="critical")
+        relay._handle_alerts({"alerts": [a]})
+        self.assertTrue(relay._work.empty())
+
+    def test_investigate_false_without_work_order_label_never_reaches_holmes(self):
+        a = dict(alert(alertname="X", investigate="false", severity="critical"), status="firing")
+        relay._handle_alerts({"alerts": [a]})
+        self.assertTrue(relay._work.empty())
+
+    def test_work_order_label_without_investigate_false_is_rejected(self):
+        a = wo_alert(investigate="true", severity="critical")
+        self._rejects(a, "alertname")
+
+    def test_forged_resolved_does_not_arm_close(self):
+        self._rejects(wo_alert(alertname="SomethingElse", status="resolved"), "alertname")
+
+    def test_bad_namespace_rejected(self):
+        for ns in ("Bad_NS", "a" * 64, "-x", ""):
+            with self.subTest(ns=ns):
+                self._rejects(wo_alert(ns=ns), "namespace")
+
+    def test_bad_image_line_rejected(self):
+        for line in ("img=12a", "ok:1=1234567", "x y=1", "noequals:1", "a=1=2"):
+            with self.subTest(line=line):
+                self._rejects(wo_alert(images="img-one:1=3\n" + line), "images")
+
+    def test_more_than_50_image_lines_rejected(self):
+        imgs = "\n".join("img-%d:1=1" % i for i in range(51))
+        self._rejects(wo_alert(images=imgs), "too_many_images")
+
+    def test_exactly_50_image_lines_accepted(self):
+        imgs = "\n".join("img-%d:1=1" % i for i in range(50))
+        counts = relay._handle_alerts({"alerts": [wo_alert(images=imgs)]})
+        self.assertEqual(counts["work-order"], 1)
+
+    def test_valid_work_order_still_queued(self):
+        a = wo_alert(ns="media", images="docker.io/x/y:1.2=3")
+        counts = relay._handle_alerts({"alerts": [a]})
+        self.assertEqual(counts["work-order"], 1)
+        self.assertEqual(counts["work-order-rejected"], 0)
+        self.assertFalse(relay._wo_queue.empty())
+
+    def test_metrics_exposition(self):
+        relay._rejected["namespace"] = 2
+        text = relay._metrics_text()
+        self.assertIn('relay_work_order_rejected_total{reason="namespace"} 2', text)
+        for r in ("alertname", "images", "too_many_images"):
+            self.assertIn('relay_work_order_rejected_total{reason="%s"} 0' % r, text)
