@@ -1,5 +1,8 @@
 # Only narrows who may post alerts to Alertmanager. It does not change routing,
-# receivers or silences.
+# receivers or silences. Alert submission is limited to the listed clients.
+# The gateway (reads and silence management) and the API server (reads via the
+# service proxy) get separate L7 rules; any L7 rule on 9093 sends all traffic to
+# that port through the Cilium proxy.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -29,6 +32,16 @@ spec:
           path: /api/v2/silences
         - method: DELETE
           path: /api/v2/silence/.*
+  # API server service proxy (kubectl get --raw): GET only.
+  - fromEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
   {{- range .Values.clients }}
   - fromEndpoints:
     - matchLabels:
