@@ -6,3 +6,4 @@ helm:
   targetRevision: "0.41.0"
   valuesFiles:
   - vmalert/values.yaml
+- path: vmalert/am-ingress

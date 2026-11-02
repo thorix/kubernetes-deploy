@@ -1,0 +1,27 @@
+# Only narrows who may post alerts to Alertmanager. It does not change routing,
+# receivers or silences.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vmalert-alertmanager-ingress
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: alertmanager
+      app.kubernetes.io/instance: vmalert
+  ingress:
+  # Kubelet probes.
+  - fromEntities:
+    - host
+  {{- range .Values.clients }}
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: {{ .namespace | quote }}
+        {{- range $k, $v := .matchLabels }}
+        k8s:{{ $k }}: {{ $v | quote }}
+        {{- end }}
+    toPorts:
+    - ports:
+      - port: "9093"
+        protocol: TCP
+  {{- end }}

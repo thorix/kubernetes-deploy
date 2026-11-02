@@ -1,0 +1,20 @@
+# Workloads allowed to reach Alertmanager on TCP 9093. An empty matchLabels
+# selects every pod in the namespace.
+clients:
+- namespace: victoriametrics
+  matchLabels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: vmalert
+- namespace: victoriametrics
+  matchLabels:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/component: single-binary
+- namespace: victoriametrics
+  matchLabels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: grafana
+- namespace: victoriametrics
+  matchLabels:
+    app.kubernetes.io/instance: holmes-alert-relay
+- namespace: upgrade-pilot
+  matchLabels: {}
