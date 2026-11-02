@@ -1,0 +1,12 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "registry.example.lan/team/app@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "Results": [
+    {
+      "Target": "fixture (alpine 0.0.0)",
+      "Vulnerabilities": [
+        {"VulnerabilityID": "CVE-0000-0003", "PkgName": "libother", "Severity": "HIGH"}
+      ]
+    }
+  ]
+}
