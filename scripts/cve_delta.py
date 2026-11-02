@@ -7,8 +7,13 @@ of (VulnerabilityID, PkgName) keys at CRITICAL severity. The check fails only if
 the new set holds a key the old set does not. Pilot reverts are exempt.
 
 Output is one line, `cve-delta: <description>`, with the description taken from
-a fixed list. Findings are never printed, summarised or uploaded; the digest
-artifact holds YAML paths, refs and digests only.
+a fixed list. A `scan failed` line may carry a cause from a fixed list in
+parentheses, e.g. `cve-delta: scan failed (unresolvable registry)`. Findings
+are never printed, summarised or uploaded; the digest artifact holds YAML
+paths, refs and digests only.
+
+An image declaration that a changed file drops (present at base, absent at
+head) fails closed like an unparseable one.
 
 Usage:
   cve_delta.py ci      # GitHub Actions; reads BASE_SHA, HEAD_SHA, PR_AUTHOR,
@@ -34,6 +39,13 @@ INTRODUCED = "new critical CVEs"
 FAILED = "scan failed"
 PASS = (NO_CHANGE, CLEAN, EXEMPT)
 FAIL = (INTRODUCED, FAILED)
+# Causes that may follow FAILED in parentheses. The line still starts with
+# `cve-delta: scan failed`, which is what callers match on.
+UNRESOLVABLE = "unresolvable registry"
+CAUSES = (UNRESOLVABLE,)
+# crane stderr when the registry host name does not resolve (for example a
+# placeholder registry host).
+UNRESOLVABLE_MARKERS = ("no such host", "server misbehaving")
 
 PLATFORM = "linux/amd64"
 # Marks an image value that is present but cannot be read as a reference. It
@@ -64,7 +76,14 @@ class Unparseable(Exception):
 
 
 class ScanError(Exception):
-    """A registry, DB or scanner error: the verdict is `scan failed`."""
+    """A registry, DB or scanner error: the verdict is `scan failed`.
+
+    `cause` is None or one of CAUSES; it is the only detail ever printed.
+    """
+
+    def __init__(self, cause=None):
+        super().__init__()
+        self.cause = cause if cause in CAUSES else None
 
 
 class Missing(Exception):
@@ -188,9 +207,15 @@ def load_images(text):
 
 
 def pair_changes(base, head):
-    """[(path, old ref or None, new ref)] for every image that differs at head."""
-    return [(path, base.get(path), head[path])
-            for path in sorted(head) if base.get(path) != head[path]]
+    """[(path, old ref or None, new ref)] for every image that differs at head.
+
+    A declaration present at base and gone at head pairs with UNPARSEABLE, so
+    it fails closed: every image the change selects is one that was scanned.
+    """
+    pairs = [(path, base.get(path), head[path])
+             for path in sorted(head) if base.get(path) != head[path]]
+    pairs += [(path, base[path], UNPARSEABLE) for path in sorted(base) if path not in head]
+    return sorted(pairs)
 
 
 def _critical_keys(rep):
@@ -237,12 +262,12 @@ def verdict(pairs, *, unparseable=False, exempt=False, introduced_keys=None):
 # ---- I/O shell
 
 
-def default_runner(argv):
+def default_runner(argv, cwd=None):
     """Run argv (list, no shell) and capture everything: nothing reaches the log."""
     timeout = 900 if os.path.basename(argv[0]) == "trivy" else 120
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, shell=False,
-                              timeout=timeout, check=False)
+                              timeout=timeout, check=False, cwd=cwd)
     except (OSError, subprocess.TimeoutExpired):
         return Result(127, "", "")
     return Result(proc.returncode, proc.stdout, proc.stderr)
@@ -291,18 +316,33 @@ def _missing(stderr):
     return "MANIFEST_UNKNOWN" in stderr or "NOT_FOUND" in stderr
 
 
+def _crane_digest(runner, crane, extra, ref):
+    res = runner([crane, "digest", *extra, ref])
+    if res.returncode != 0:
+        if _missing(res.stderr):
+            raise Missing()
+        if any(m in res.stderr for m in UNRESOLVABLE_MARKERS):
+            raise ScanError(UNRESOLVABLE)
+        raise ScanError()
+    digest = res.stdout.strip()
+    if not DIGEST.match(digest):
+        raise ScanError()
+    return digest
+
+
 def resolve(runner, crane, ref):
-    """(index digest, linux/amd64 platform digest). Raises Missing or ScanError."""
-    digests = []
-    for extra in ([], ["--platform", PLATFORM]):
-        res = runner([crane, "digest", *extra, ref])
-        if res.returncode != 0:
-            raise Missing() if _missing(res.stderr) else ScanError()
-        digest = res.stdout.strip()
-        if not DIGEST.match(digest):
-            raise ScanError()
-        digests.append(digest)
-    return digests[0], digests[1]
+    """(index digest, linux/amd64 platform digest). Raises Missing or ScanError.
+
+    The ref is resolved once; the platform digest is then read through the
+    immutable index digest, so both digests describe the same image even if
+    the tag moves between the two requests.
+    """
+    parsed = parse_ref(ref)
+    if parsed is None:
+        raise ScanError()
+    index = _crane_digest(runner, crane, [], ref)
+    platform = _crane_digest(runner, crane, ["--platform", PLATFORM], parsed[0] + "@" + index)
+    return index, platform
 
 
 class Scanner:
@@ -313,16 +353,26 @@ class Scanner:
         self.db_ready = False
         self.cache = {}
 
+    def _trivy(self, *args):
+        # Trivy reads trivy.yaml and .trivyignore from its working directory.
+        # It runs in the private temp dir with an explicit empty ignore file,
+        # so no file from the checkout shapes the scan.
+        return self.runner([self.trivy, "image", *args], cwd=self.tmpdir)
+
     def scan(self, repo, digest):
         if not self.db_ready:
-            if self.runner([self.trivy, "image", "--download-db-only"]).returncode != 0:
+            if self._trivy("--download-db-only").returncode != 0:
                 raise ScanError()
             self.db_ready = True
         target = "%s@%s" % (repo, digest)
         if target not in self.cache:
             out = os.path.join(self.tmpdir, "scan-%d.json" % len(self.cache))
-            res = self.runner([self.trivy, "image", "--skip-db-update", "--severity", "CRITICAL",
-                               "--format", "json", "--quiet", "--output", out, target])
+            ignore = os.path.join(self.tmpdir, "empty.trivyignore")
+            with open(ignore, "w"):
+                pass
+            res = self._trivy("--skip-db-update", "--severity", "CRITICAL",
+                              "--format", "json", "--quiet", "--ignorefile", ignore,
+                              "--output", out, target)
             if res.returncode != 0:
                 raise ScanError()
             try:
@@ -359,8 +409,11 @@ def delta(scanner, crane, old_ref, new_ref):
             "old_platform_digest": old_platform}
 
 
-def _emit(out, description):
-    out.write("cve-delta: %s\n" % description)
+def _emit(out, description, cause=None):
+    line = description
+    if description == FAILED and cause in CAUSES:
+        line += " (%s)" % cause
+    out.write("cve-delta: %s\n" % line)
     return 0 if description in PASS else 1
 
 
@@ -397,7 +450,7 @@ def run_ci(env, runner=default_runner, out=sys.stdout):
         return _emit(out, verdict(pairs, unparseable=unparseable)[1])
     if _exemption(env, runner, pairs):
         return _emit(out, verdict(pairs, exempt=True)[1])
-    keys, artifact = None, []
+    keys, artifact, cause = None, [], None
     try:
         with tempfile.TemporaryDirectory(prefix="cve-delta-") as tmp:
             scanner = Scanner(runner, trivy, tmp)
@@ -408,22 +461,22 @@ def run_ci(env, runner=default_runner, out=sys.stdout):
                 artifact.append({"path": path, "ref": new_ref,
                                  "index_digest": got["new_index_digest"],
                                  "platform_digest": got["new_platform_digest"]})
-    except ScanError:
-        keys = None
+    except ScanError as exc:
+        keys, cause = None, exc.cause
     desc = verdict(pairs, introduced_keys=keys)[1]
     if keys is not None and env.get("ARTIFACT_PATH"):
         with open(env["ARTIFACT_PATH"], "w") as fh:
             json.dump(artifact, fh, indent=2)
             fh.write("\n")
-    return _emit(out, desc)
+    return _emit(out, desc, cause)
 
 
 def run_pair(args, runner=default_runner, out=sys.stdout):
     try:
         with tempfile.TemporaryDirectory(prefix="cve-delta-") as tmp:
             got = delta(Scanner(runner, args.trivy_bin, tmp), args.crane_bin, args.old, args.new)
-    except ScanError:
-        return _emit(out, FAILED)
+    except ScanError as exc:
+        return _emit(out, FAILED, exc.cause)
     ok, desc = verdict([("pair", args.old, args.new)], introduced_keys=got["introduced"])
     if not args.verbose:
         return _emit(out, desc)
