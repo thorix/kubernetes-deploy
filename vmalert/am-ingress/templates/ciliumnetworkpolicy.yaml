@@ -32,9 +32,11 @@ spec:
           path: /api/v2/silences
         - method: DELETE
           path: /api/v2/silence/.*
-  # API server service proxy (kubectl get --raw): GET only.
+  # API server service proxy (kubectl get --raw): GET only. API servers on
+  # other nodes arrive as remote-node, so both identities are listed.
   - fromEntities:
     - kube-apiserver
+    - remote-node
     toPorts:
     - ports:
       - port: "9093"
