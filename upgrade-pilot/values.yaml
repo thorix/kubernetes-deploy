@@ -14,6 +14,8 @@ cronjob:
   # further from anyone's view.
   restartPolicy: Never
   backoffLimit: 0
+  # A run that cannot start or finish within an hour fails visibly instead of blocking every later run under Forbid.
+  activeDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
 
