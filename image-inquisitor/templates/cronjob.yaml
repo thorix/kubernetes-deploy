@@ -50,6 +50,11 @@ spec:
               command: ["/bin/trivy"]
               args: ["image", "--download-db-only", "--cache-dir", "/cache"]
               env:
+                # No version check or telemetry calls to the Trivy project on each run.
+                - name: TRIVY_SKIP_VERSION_CHECK
+                  value: "true"
+                - name: TRIVY_DISABLE_TELEMETRY
+                  value: "true"
                 - name: TRIVY_DB_REPOSITORY
                   value: {{ .Values.trivy.dbRepository | quote }}
                 - name: TMPDIR
@@ -72,6 +77,11 @@ spec:
               command: ["/bin/trivy"]
               args: ["image", "--download-java-db-only", "--cache-dir", "/cache"]
               env:
+                # No version check or telemetry calls to the Trivy project on each run.
+                - name: TRIVY_SKIP_VERSION_CHECK
+                  value: "true"
+                - name: TRIVY_DISABLE_TELEMETRY
+                  value: "true"
                 - name: TRIVY_JAVA_DB_REPOSITORY
                   value: {{ .Values.trivy.javaDbRepository | quote }}
                 - name: TMPDIR
@@ -108,6 +118,11 @@ spec:
                 - --exclude-kubernetes-namespaces={{ . }}
                 {{- end }}
               env:
+                # No version check or telemetry calls to the Trivy project on each run.
+                - name: TRIVY_SKIP_VERSION_CHECK
+                  value: "true"
+                - name: TRIVY_DISABLE_TELEMETRY
+                  value: "true"
                 - name: TRIVY_CACHE_DIR
                   value: /cache
                 # The initContainers already fetched both DBs. Without these the
