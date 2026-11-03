@@ -129,6 +129,12 @@ spec:
                 # parallel workers each try to refresh them and race one another.
                 - name: TRIVY_SKIP_DB_UPDATE
                   value: "true"
+                # The workers run Trivy in parallel against one cache dir. Newer Trivy
+                # releases take an exclusive lock on the fs layer cache, so concurrent scans
+                # time out waiting for it. Keep the per-scan layer cache in memory; the
+                # vulnerability DBs are still read from the shared cache dir.
+                - name: TRIVY_CACHE_BACKEND
+                  value: memory
                 - name: TRIVY_SKIP_JAVA_DB_UPDATE
                   value: "true"
                 # Kept for tools that honour it, but the writable /tmp mount below
