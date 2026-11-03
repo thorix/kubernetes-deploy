@@ -1,6 +1,6 @@
 image:
   repository: harbor.lan/library/frost-alert
-  tag: "v0.1.8"
+  tag: "v0.1.9"
 
 containerPort: 8080
 
