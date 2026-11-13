@@ -89,7 +89,7 @@ configMap:
 
 initContainers:
   - name: bootstrap
-    image: squidfunk/mkdocs-material:9.7.7
+    image: squidfunk/mkdocs-material:9.8.1
     imagePullPolicy: IfNotPresent
     # UID 65534 (nobody), NOT 101. OpenSSH calls getpwuid() at startup and dies
     # with "No user exists for uid 101" before making any connection — the
@@ -140,7 +140,7 @@ initContainers:
 
 extraContainers:
   - name: refresh
-    image: squidfunk/mkdocs-material:9.7.7
+    image: squidfunk/mkdocs-material:9.8.1
     imagePullPolicy: IfNotPresent
     # UID 65534 (nobody) for the same reason as the bootstrap container above:
     # this image has no UID 101, and ssh refuses to start without a passwd entry.
