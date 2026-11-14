@@ -2,7 +2,8 @@
 # The Pebble app on the phone is the MCP client (the cloud/on-device model
 # only picks tools), so the bridge is tailnet-only: no public route. Reached
 # through a Tailscale Ingress (tailnet/ chart), limited by tailnet ACL to the
-# phone, plus the bearer token.
+# phone, plus the bearer token. The overlay can also enable an HTTPRoute on
+# the https-gateway.
 
 # -> resources named "pebble-bridge", selector app.kubernetes.io/name=pebble-bridge
 nameOverride: pebble-bridge
@@ -57,6 +58,14 @@ volumes:
 service:
   port: 8765
 
+# HTTPRoute - disabled by default, enabled in the cluster overlay
+httproute:
+  enabled: false
+  hostname: ""
+  gateway:
+    name: https-gateway
+    namespace: kube-system
+
 probes:
   enabled: true
   liveness:
@@ -91,5 +100,5 @@ vault:
 networkPolicy:
   enabled: true
   ingress:
-    # Cilium gateway / tailscale, for the public route added later.
+    # Cilium gateway (HTTPRoute) / tailscale (Ingress).
     gatewayOnly: true
