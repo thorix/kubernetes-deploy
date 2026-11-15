@@ -10,7 +10,7 @@ nameOverride: pebble-bridge
 
 image:
   repository: harbor.lan/library/pebble-bridge
-  tag: "8d59491@sha256:62c73b9b66aae1a06ee96214796716498c417d73a3bce5de717beaf0ea900d65"
+  tag: "36c58e2@sha256:18a05405fc48b684f5f67103c526b95c6f1ff8dc3229cffc2bcf8100f645533b"
 
 containerPort: 8765
 
